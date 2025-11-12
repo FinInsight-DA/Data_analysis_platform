@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 import os, sys
 from dotenv import load_dotenv
 
-# 현재 파일(1.crawling/app_crawling.py) 기준 경로
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, os.pardir))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))  # 루트/.env 로드
@@ -18,7 +17,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# CSS 스타일
 st.markdown("""
 <style>
     .main-header {
