@@ -1,3 +1,12 @@
 data/hv_labeled.csv
 data/hv_labeled.csv
 data/hv_labeled.csv
+
+# 보안
+.env
+
+# 파이썬 캐시파일
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
