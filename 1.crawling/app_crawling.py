@@ -1,11 +1,15 @@
-"""
-Insightpage API 크롤링 Streamlit 앱
-"""
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-from insightpage_api import InsightPageAPI
+import os, sys
+from dotenv import load_dotenv
+
+# 현재 파일(1.crawling/app_crawling.py) 기준 경로
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, os.pardir))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))  # 루트/.env 로드
+
+from crawling import InsightPageAPI
 
 # 페이지 설정
 st.set_page_config(
@@ -46,8 +50,9 @@ def main():
         # API 설정
         api_key = st.text_input(
             "API 키",
-            value="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0eXBlIjoiQVBJIEtleSAtIFB1YmxpYyIsImV4cCI6MTc2NzIyNTU5OS4wfQ.kCXxCuJOs8__wVJdJqkeFz893I30HW5ai-hM1i4zaqE",
-            type="password"
+            value=os.getenv("INSIGHT_API_KEY", ""),  # ← .env 값
+            type="password",
+            key="api_key_tab1",
         )
         
         # 검색 설정
@@ -285,8 +290,87 @@ def main():
             )
     
     with tab2:
-        st.markdown("### 학습데이터")
-        st.info("이 탭은 향후 학습 데이터 관리 기능이 추가될 예정입니다.")
+        st.markdown("### 🧹 학습 데이터 준비 및 검토")
+        
+        # 1. 데이터 로드 확인 및 업로드 기능
+        if 'crawled_data' not in st.session_state or st.session_state['crawled_data'] is None:
+            st.warning("⚠️ 먼저 '크롤링API' 탭에서 데이터를 수집하거나, CSV 파일을 업로드하여 데이터를 로드하세요.")
+            
+            # 파일 업로드 옵션
+            uploaded_file = st.file_uploader("로컬에서 전처리된 학습 데이터 CSV 업로드", type=['csv'], key='train_upload')
+            
+            if uploaded_file is not None:
+                # 업로드된 데이터를 임시로 session_state에 저장하여 사용
+                try:
+                    df_loaded = pd.read_csv(uploaded_file)
+                    st.session_state['processed_data'] = df_loaded
+                    st.success(f"✅ 파일 로드 완료. 총 {len(df_loaded):,}개 문서.")
+                except Exception as e:
+                    st.error(f"파일 로드 중 오류 발생: {e}")
+            
+            if st.session_state.get('processed_data') is None and st.session_state.get('crawled_data') is None:
+                return # 데이터가 없으면 탭 진행 중단
+        
+        # 크롤링된 데이터 또는 업로드된 데이터 사용
+        df = st.session_state.get('processed_data') if 'processed_data' in st.session_state else st.session_state.get('crawled_data')
+        
+        if df is None:
+            return
+
+        # 2. KPI Metrics (현재 데이터 상태)
+        total_rows = len(df)
+        # 'sentiment' 컬럼 존재 여부로 라벨링 완료 상태 추정 (1_감성라벨부착.ipynb 결과)
+        has_sentiment = 'sentiment' in df.columns
+        
+        col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+        with col_kpi1:
+            st.metric("총 데이터 행 수", f"{total_rows:,} 개")
+        with col_kpi2:
+            st.metric("감성 라벨 존재 여부", "✅ 있음" if has_sentiment else "❌ 없음")
+        with col_kpi3:
+            st.metric("다음 단계 준비 상태", "✅ 학습 준비 완료" if has_sentiment else "⚠️ 라벨링 단계 필요")
+
+        st.markdown("---")
+        
+        # 3. 데이터 클리닝/전처리 설정 (1_감성라벨부착.ipynb 및 전처리 단계 반영)
+        st.markdown("### ⚙️ 데이터 클리닝 및 전처리 설정")
+        with st.expander("전처리 옵션 설정 (실제 적용 로직은 백엔드에서 구현 필요)", expanded=False):
+            
+            st.subheader("1. 중복/노이즈 제거")
+            col_clean1, col_clean2 = st.columns(2)
+            with col_clean1:
+                dedup_option = st.checkbox("문서 중복 제거", value=True, help="제목/본문이 완전히 동일한 문서를 제거합니다.")
+                short_filter = st.slider("최소 길이 필터 (단어)", min_value=5, max_value=50, value=10, help="이 길이 미만의 문장을 제거합니다.", key='min_len_filter')
+            with col_clean2:
+                # 불용어 처리 설정
+                st.text_area("추가 불용어 목록", value="기자, 관련, 이날, 현재, 것으로", height=100, key='stopwords_list')
+                
+            st.subheader("2. 텍스트 정규화")
+            normalize_text = st.checkbox("문자 정규화 (이모지, 특수기호)", value=True, key='normalize_check')
+
+        st.markdown("---")
+        
+        # 4. 데이터 미리보기
+        st.markdown("### 📋 데이터 미리보기")
+        st.dataframe(df.head(10), use_container_width=True)
+        
+        # 5. 최종 작업 버튼
+        st.markdown("---")
+        
+        # 데이터프레임을 CSV로 변환 (다운로드를 위해)
+        csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"training_data_{timestamp}.csv"
+        
+        st.download_button(
+            label="💾 전처리된 학습 데이터 다운로드 (CSV)", 
+            data=csv_data,
+            file_name=filename,
+            mime="text/csv",
+            use_container_width=True,
+            type='secondary'
+        )
+        st.caption("이 파일을 다운로드하여 `1_감성라벨부착.ipynb` 등의 학습 단계에 사용하세요.")
 
 
 if __name__ == "__main__":
