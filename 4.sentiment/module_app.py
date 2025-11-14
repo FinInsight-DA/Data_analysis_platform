@@ -1,6 +1,11 @@
-# module_app.py (최종 통합 자동진행률 버전)
 import os
+import sys
 import tempfile
+
+CURRENT_DIR = os.path.dirname(__file__)
+if CURRENT_DIR not in sys.path:
+    sys.path.append(CURRENT_DIR)
+
 import streamlit as st
 import pandas as pd
 import torch
@@ -9,48 +14,43 @@ import seaborn as sns
 from sentiment_module import run_selected_models
 from sentiment_absa import ABSAModel
 
-# =========================
-# 페이지 설정 
-# =========================
-st.set_page_config(
-    page_title="통합 감성 분석 대시보드",
-    page_icon="📊",
-    layout="wide"
-)
 
-st.title("📊 통합 감성 분석 대시보드")
-st.write("데이터 업로드 → 모델 비교 학습 → ABSA 감성 분석 → 결과 CSV 다운로드까지 한 페이지에서 순차적으로 진행합니다.")
+def main():
+    # =========================
+    # GPU 상태 표시
+    # =========================
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        st.success(f"⚡ GPU 사용 중: {gpu_name}")
+    else:
+        st.warning("💻 GPU 미사용 - CPU로 실행됩니다.")
 
-# =========================
-# GPU 상태 표시
-# =========================
-if torch.cuda.is_available():
-    gpu_name = torch.cuda.get_device_name(0)
-    st.success(f"⚡ GPU 사용 중: {gpu_name}")
-else:
-    st.warning("💻 GPU 미사용 - CPU로 실행됩니다.")
+    # =========================
+    # 초기화 버튼
+    # =========================
+    if st.button("🧹 초기화"):
+        for key in ["final_result", "absa_result", "absa_model", "uploaded_file_path"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.info("세션이 초기화되었습니다. CSV를 다시 업로드해주세요.")
 
-# =========================
-# 초기화 버튼
-# =========================
-if st.button("🧹 초기화"):
-    for key in ["final_result", "absa_result", "absa_model", "uploaded_file_path"]:
-        if key in st.session_state:
-            del st.session_state[key]
-    st.info("세션이 초기화되었습니다. CSV를 다시 업로드해주세요.")
+    # =========================
+    # CSV 업로드
+    # =========================
+    uploaded_file = st.file_uploader("CSV 파일 업로드", type=["csv"])
+    st.markdown("**⚠️ CSV에는 반드시 `sentence`, `sentiment` 컬럼이 있어야 합니다.**")
 
-# =========================
-# CSV 업로드
-# =========================
-uploaded_file = st.file_uploader("CSV 파일 업로드", type=["csv"])
-st.markdown("**⚠️ CSV에는 반드시 `sentence`, `sentiment` 컬럼이 있어야 합니다.**")
+    # 파일이 없으면 안내만
+    if not uploaded_file:
+        st.info("CSV 파일을 업로드하면 모델 성능 비교 및 ABSA 분석을 시작할 수 있습니다.")
+        return
 
-if uploaded_file:
+    # 파일이 있으면 이후 로직 실행
     df = pd.read_csv(uploaded_file)
     st.subheader("📄 데이터 미리보기")
     st.dataframe(df.head(10))
 
-    # 임시 파일 생성
+    # 임시 파일 생성 (전통 ML/딥러닝 학습 함수에 전달)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
         df.to_csv(tmp.name, index=False, encoding="utf-8-sig")
         temp_path = tmp.name
@@ -64,9 +64,15 @@ if uploaded_file:
     st.subheader("🔍 모델 선택 및 학습")
     col1, col2 = st.columns(2)
     with col1:
-        selected_ml = st.multiselect("전통 ML 모델 선택", ["RF", "SVM", "NB"], default=[])
+        selected_ml = st.multiselect(
+            "전통 ML 모델 선택", ["RF", "SVM", "NB"], default=[]
+        )
     with col2:
-        selected_dl = st.multiselect("딥러닝 모델 선택", ["KoBERT", "KoELECTRA", "KoRoBERTa", "BERT"], default=[])
+        selected_dl = st.multiselect(
+            "딥러닝 모델 선택",
+            ["KoBERT", "KoELECTRA", "KoRoBERTa", "BERT"],
+            default=[],
+        )
 
     # =========================
     # 모델 학습 (자동 진행률)
@@ -91,9 +97,13 @@ if uploaded_file:
         for model_name in selected_models:
             with st.spinner(f"🧠 [{model_name}] 학습 중..."):
                 if model_name in ["RF", "SVM", "NB"]:
-                    df_result = run_selected_models(selected_ml=[model_name], input_csv=temp_path)
+                    df_result = run_selected_models(
+                        selected_ml=[model_name], input_csv=temp_path
+                    )
                 else:
-                    df_result = run_selected_models(selected_dl=[model_name], input_csv=temp_path)
+                    df_result = run_selected_models(
+                        selected_dl=[model_name], input_csv=temp_path
+                    )
                 results.append(df_result)
 
             # 모델 1개 완료 시 진행률 갱신
@@ -118,10 +128,19 @@ if uploaded_file:
         if "final_result" in st.session_state:
             st.dataframe(st.session_state.final_result)
 
-            fig, ax = plt.subplots(figsize=(10, 4))
-            sns.barplot(data=st.session_state.final_result, x='Model', y='Accuracy', ax=ax)
-            ax.set_ylim(0, 1)
-            st.pyplot(fig, clear_figure=True)
+            if (
+                "Accuracy" in st.session_state.final_result.columns
+                and "Model" in st.session_state.final_result.columns
+            ):
+                fig, ax = plt.subplots(figsize=(10, 4))
+                sns.barplot(
+                    data=st.session_state.final_result,
+                    x="Model",
+                    y="Accuracy",
+                    ax=ax,
+                )
+                ax.set_ylim(0, 1)
+                st.pyplot(fig, clear_figure=True)
 
     st.markdown("---")
 
@@ -135,10 +154,12 @@ if uploaded_file:
         "KoBERT": "skt/kobert-base-v1",
         "KoELECTRA": "monologg/koelectra-base-v3-discriminator",
         "KoRoBERTa": "klue/roberta-base",
-        "BERT": "bert-base-uncased"
+        "BERT": "bert-base-uncased",
     }
 
-    model_choice_user = st.selectbox("사용할 ABSA 모델 선택", user_friendly_models, index=1)
+    model_choice_user = st.selectbox(
+        "사용할 ABSA 모델 선택", user_friendly_models, index=1
+    )
     model_choice_path = model_mapping[model_choice_user]
 
     # ABSA 분석 버튼
@@ -157,7 +178,7 @@ if uploaded_file:
         sentiments, confidences = [], []
         total = len(df)
 
-        for i, sentence in enumerate(df['sentence'], start=1):
+        for i, sentence in enumerate(df["sentence"], start=1):
             label, conf = model.analyze_sentiment(sentence)
             sentiments.append(label)
             confidences.append(conf)
@@ -166,8 +187,8 @@ if uploaded_file:
                 progress_bar.progress(i / total)
                 progress_text.text(f"감성 분석 중: {i}/{total}")
 
-        df['pred_label'] = sentiments
-        df['confidence'] = confidences
+        df["pred_label"] = sentiments
+        df["confidence"] = confidences
         st.session_state.absa_result = df
 
     # =========================
@@ -185,8 +206,9 @@ if uploaded_file:
             data=csv_bytes,
             file_name=download_file_name,
             mime="text/csv",
-            key="download_absa"
+            key="download_absa",
         )
 
-else:
-    st.info("CSV 파일을 업로드하면 모델 성능 비교 및 ABSA 분석을 시작할 수 있습니다.")
+
+if __name__ == "__main__":
+    main()

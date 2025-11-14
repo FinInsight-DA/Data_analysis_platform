@@ -1,22 +1,14 @@
-# labeling_app.py
+import os, sys
+
+CURRENT_DIR = os.path.dirname(__file__)
+if CURRENT_DIR not in sys.path:
+    sys.path.append(CURRENT_DIR)
+
 import streamlit as st
 import pandas as pd
 import tempfile
 import torch
 from sentiment_labeling import run_sentiment_labeling
-import os
-
-# =========================
-# 페이지 설정
-# =========================
-st.set_page_config(
-    page_title="감성 라벨링",
-    page_icon="🏷️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-st.title("🏷️ 감성 라벨링 대시보드")
 
 # =========================
 # 파일 업로드
