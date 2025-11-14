@@ -2,10 +2,14 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import os, sys
+from dotenv import load_dotenv
 
 CURRENT_DIR = os.path.dirname(__file__)
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__)) 
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from crawling import InsightPageAPI
 
