@@ -10,3 +10,11 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Sentiment model temp results
+results_KoELECTRA/
+temp_model/
+
+# HuggingFace / Trainer outputs
+**/checkpoint-*/
+**/runs/
