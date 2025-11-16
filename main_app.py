@@ -36,7 +36,7 @@ PAGES = {
     "③ LDA": ROOT / "3-1.lda" / "lda_app.py",
     "④ BERTopic": ROOT / "3-2.bertopic" / "bertopic_app.py",
     "⑤ 감성 분석": ROOT / "4.sentiment" / "sentiment_app.py",  # ← 여기만 변경
-    "⑥ OLS 회귀": ROOT / "5.ols" / "ols_app.py",
+    "⑥ OLS 회귀": ROOT / "5.ols" / "streamlit_app.py",
 }
 
 
