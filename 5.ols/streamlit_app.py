@@ -1,5 +1,12 @@
 import pandas as pd
 import streamlit as st
+import sys
+from pathlib import Path
+
+# 같은 디렉토리의 모듈을 임포트하기 위해 경로 추가
+_current_dir = Path(__file__).resolve().parent
+if str(_current_dir) not in sys.path:
+    sys.path.insert(0, str(_current_dir))
 
 from crawl_market_data import crawl_market_data, resolve_stock_code
 from ols_analysis import run_regression_scenarios_from_frames
