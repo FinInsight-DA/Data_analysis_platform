@@ -2,6 +2,8 @@ import pandas as pd
 import streamlit as st
 import sys
 from pathlib import Path
+import plotly.graph_objects as go
+import plotly.express as px
 
 # 같은 디렉토리의 모듈을 임포트하기 위해 경로 추가
 _current_dir = Path(__file__).resolve().parent
@@ -333,8 +335,103 @@ if submitted:
                         file_name=f"coefficients_{label}_{safe_name}.csv",
                         mime="text/csv",
                     )
-
+                    
+                    # 감성 컬럼 집합 정의 (시각화에 사용)
                     sentiment_columns_set = set(candidate_features + lag_generated_feature_names)
+                    
+                    # 회귀 계수 시각화
+                    coef_df = result.coefficients.copy()
+                    # 상수항 제외하고 감성 변수만 필터링
+                    sentiment_coefs = coef_df[
+                        (coef_df["variable"] != "const") & 
+                        (coef_df["variable"].isin(sentiment_columns_set))
+                    ].copy()
+                    
+                    if not sentiment_coefs.empty:
+                        sentiment_coefs = sentiment_coefs.sort_values("coef", ascending=True)
+                        
+                        # 계수 막대 그래프
+                        fig_coef = go.Figure()
+                        
+                        # 양수 계수 (파란색)
+                        positive_coefs = sentiment_coefs[sentiment_coefs["coef"] > 0]
+                        if not positive_coefs.empty:
+                            fig_coef.add_trace(go.Bar(
+                                y=positive_coefs["variable"],
+                                x=positive_coefs["coef"],
+                                name="양(+) 영향",
+                                marker_color="steelblue",
+                                orientation="h",
+                                error_x=dict(
+                                    type="data",
+                                    array=positive_coefs["coef"] - positive_coefs["ci_lower"],
+                                    arrayminus=positive_coefs["ci_upper"] - positive_coefs["coef"],
+                                    visible=True
+                                ),
+                                text=[f"p={p:.3f}" for p in positive_coefs["p_value"]],
+                                textposition="outside",
+                                hovertemplate="<b>%{y}</b><br>계수: %{x:.4f}<br>p-value: %{text}<extra></extra>"
+                            ))
+                        
+                        # 음수 계수 (빨간색)
+                        negative_coefs = sentiment_coefs[sentiment_coefs["coef"] <= 0]
+                        if not negative_coefs.empty:
+                            fig_coef.add_trace(go.Bar(
+                                y=negative_coefs["variable"],
+                                x=negative_coefs["coef"],
+                                name="음(-) 영향",
+                                marker_color="crimson",
+                                orientation="h",
+                                error_x=dict(
+                                    type="data",
+                                    array=negative_coefs["coef"] - negative_coefs["ci_lower"],
+                                    arrayminus=negative_coefs["ci_upper"] - negative_coefs["coef"],
+                                    visible=True
+                                ),
+                                text=[f"p={p:.3f}" for p in negative_coefs["p_value"]],
+                                textposition="outside",
+                                hovertemplate="<b>%{y}</b><br>계수: %{x:.4f}<br>p-value: %{text}<extra></extra>"
+                            ))
+                        
+                        fig_coef.update_layout(
+                            title=f"{scenario_name} - 회귀 계수 (신뢰구간 포함)",
+                            xaxis_title="계수 값",
+                            yaxis_title="감성 변수",
+                            height=max(400, len(sentiment_coefs) * 30),
+                            hovermode="closest",
+                            showlegend=True,
+                            xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor="gray")
+                        )
+                        
+                        st.plotly_chart(fig_coef, use_container_width=True)
+                        
+                        # 유의성별 히트맵
+                        if len(sentiment_coefs) > 1:
+                            # p-value를 기반으로 히트맵 데이터 생성
+                            heatmap_data = sentiment_coefs[["variable", "coef", "p_value"]].copy()
+                            heatmap_data["유의성"] = heatmap_data["p_value"].apply(
+                                lambda p: "***" if p < 0.01 else ("**" if p < 0.05 else ("*" if p < 0.1 else "ns"))
+                            )
+                            
+                            # 계수 크기와 유의성을 함께 표시하는 히트맵
+                            fig_heatmap = px.scatter(
+                                heatmap_data,
+                                x="coef",
+                                y="variable",
+                                size="p_value",
+                                color="coef",
+                                color_continuous_scale="RdBu",
+                                color_continuous_midpoint=0,
+                                hover_data=["p_value", "유의성"],
+                                title=f"{scenario_name} - 감성 변수 영향도 (크기: p-value, 색상: 계수)",
+                                labels={"coef": "회귀 계수", "variable": "감성 변수", "p_value": "p-value"}
+                            )
+                            fig_heatmap.update_layout(
+                                height=max(400, len(sentiment_coefs) * 30),
+                                xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor="gray")
+                            )
+                            st.plotly_chart(fig_heatmap, use_container_width=True)
+
                     sentiment_effects = result.coefficients[
                         result.coefficients["variable"].isin(sentiment_columns_set)
                     ].copy()
@@ -385,8 +482,77 @@ if submitted:
                             "유의성 표기는 통계적 유의수준을 의미합니다."
                         )
 
-            with st.expander(f"{label} 시장 데이터 미리보기"):
-                st.dataframe(market_df.tail().sort_values("date"), use_container_width=True)
+            # 시장 데이터 시각화
+            if not market_df.empty and "date" in market_df.columns:
+                market_df_viz = market_df.copy()
+                market_df_viz["date"] = pd.to_datetime(market_df_viz["date"])
+                market_df_viz = market_df_viz.sort_values("date")
+                
+                with st.expander(f"{label} 시장 데이터 시각화", expanded=False):
+                    # 주가 시계열 차트
+                    if "Close" in market_df_viz.columns or "종가" in market_df_viz.columns:
+                        price_col = "Close" if "Close" in market_df_viz.columns else "종가"
+                        fig_price = go.Figure()
+                        fig_price.add_trace(go.Scatter(
+                            x=market_df_viz["date"],
+                            y=market_df_viz[price_col],
+                            mode="lines",
+                            name="종가",
+                            line=dict(color="steelblue", width=2),
+                            hovertemplate="날짜: %{x}<br>종가: %{y:,.0f}원<extra></extra>"
+                        ))
+                        fig_price.update_layout(
+                            title=f"{label} 주가 시계열",
+                            xaxis_title="날짜",
+                            yaxis_title="종가 (원)",
+                            hovermode="x unified",
+                            height=400
+                        )
+                        st.plotly_chart(fig_price, use_container_width=True)
+                    
+                    # 일일 수익률 시계열
+                    if "daily_return" in market_df_viz.columns:
+                        fig_return = go.Figure()
+                        colors = ["red" if x < 0 else "green" for x in market_df_viz["daily_return"]]
+                        fig_return.add_trace(go.Bar(
+                            x=market_df_viz["date"],
+                            y=market_df_viz["daily_return"],
+                            name="일일 수익률",
+                            marker_color=colors,
+                            hovertemplate="날짜: %{x}<br>수익률: %{y:.4f}<extra></extra>"
+                        ))
+                        fig_return.update_layout(
+                            title=f"{label} 일일 수익률",
+                            xaxis_title="날짜",
+                            yaxis_title="일일 수익률",
+                            hovermode="x unified",
+                            height=400,
+                            yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor="gray")
+                        )
+                        st.plotly_chart(fig_return, use_container_width=True)
+                    
+                    # 환율 시계열 (있는 경우)
+                    if "USDKRW" in market_df_viz.columns:
+                        fig_fx = go.Figure()
+                        fig_fx.add_trace(go.Scatter(
+                            x=market_df_viz["date"],
+                            y=market_df_viz["USDKRW"],
+                            mode="lines",
+                            name="USD/KRW",
+                            line=dict(color="orange", width=2),
+                            hovertemplate="날짜: %{x}<br>환율: %{y:,.2f}원<extra></extra>"
+                        ))
+                        fig_fx.update_layout(
+                            title=f"{label} USD/KRW 환율",
+                            xaxis_title="날짜",
+                            yaxis_title="환율 (원)",
+                            hovermode="x unified",
+                            height=400
+                        )
+                        st.plotly_chart(fig_fx, use_container_width=True)
+                
+                with st.expander(f"{label} 시장 데이터 미리보기"):
+                    st.dataframe(market_df.tail().sort_values("date"), use_container_width=True)
 
             st.download_button(
                 label=f"{label} 시세·환율 CSV 다운로드",
