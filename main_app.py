@@ -35,10 +35,10 @@ PAGES = {
     "② H/V 라벨링": ROOT / "2.data_preparation" / "hv_labeling_app.py",
     "③ LDA": ROOT / "3-1.lda" / "lda_app.py",
     "④ BERTopic": ROOT / "3-2.bertopic" / "bertopic_app.py",
-    "⑤ 감성(모델비교·ABSA)": ROOT / "4.sentiment" / "module_app.py",
-    # OLS는 ols_app.py(권장). 아직 래핑 전이면 streamlit_app.py로 임시 연결 가능
-    "⑥ OLS 회귀": ROOT / "5.ols" / "ols_app.py",  # 필요 시 "streamlit_app.py"로 교체
+    "⑤ 감성 분석": ROOT / "4.sentiment" / "sentiment_app.py",  # ← 여기만 변경
+    "⑥ OLS 회귀": ROOT / "5.ols" / "ols_app.py",
 }
+
 
 # ===========================================================================
 # 앱 설정
@@ -71,12 +71,12 @@ with st.sidebar:
         menu_title=None,
         options=list(PAGES.keys()),
         icons=[
-            "cloud-download",          # ① 크롤링
-            "tags",                    # ② H/V 라벨링
-            "list-task",               # ③ LDA
-            "diagram-3",               # ④ BERTopic
-            "emoji-smile",             # ⑤ 감성(모델비교·ABSA)
-            "graph-up-arrow",          # ⑥ OLS 회귀
+            "cloud-download",   # ① 크롤링
+            "tags",             # ② H/V 라벨링
+            "list-task",        # ③ LDA
+            "diagram-3",        # ④ BERTopic
+            "emoji-smile",      # ⑤ 감성 분석
+            "graph-up-arrow",   # ⑥ OLS 회귀
         ],
         menu_icon="list",
         default_index=0,
