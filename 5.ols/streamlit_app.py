@@ -16,7 +16,27 @@ from ols_analysis import run_regression_scenarios_from_frames
 
 def main():
     # --- 페이지 타이틀 ---
-    st.title("감성·토픽 기반 OLS 회귀 분석")
+    st.markdown('<div class="main-header">감성·토픽 기반 OLS 회귀 분석</div>', unsafe_allow_html=True)
+    st.markdown("---")
+
+    st.markdown("""
+        <style>
+            .main-header {
+                font-size: 2.5rem;
+                font-weight: bold;
+                color: #1f77b4;
+                text-align: center;
+                margin-bottom: 2rem;
+            }
+            .sub-header {
+                font-size: 1.5rem;
+                font-weight: bold;
+                color: #2c3e50;
+                margin-top: 2rem;
+                margin-bottom: 1rem;
+            }
+        </style>
+        """, unsafe_allow_html=True)
 
     # --- 데이터 업로드 ---
     uploaded_sentiment = st.file_uploader(
