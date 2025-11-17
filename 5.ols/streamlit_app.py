@@ -21,7 +21,7 @@ from ols_analysis import run_regression_scenarios_from_frames
 def get_korean_font_path():
     """시스템에서 한글 폰트를 찾아서 경로를 반환"""
     candidates = [
-        "C:/Windows/Fonts/malgun.ttf",                  # 윈도우 맑은고딕
+        "C:/Windows/Fonts/malgun.ttf",                 # 윈도우 맑은고딕
         "C:/Windows/Fonts/malgunbd.ttf",
         "/System/Library/Fonts/AppleSDGothicNeo.ttc",   # macOS
     ]
