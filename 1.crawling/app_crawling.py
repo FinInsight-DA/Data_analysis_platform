@@ -1,77 +1,130 @@
+# -*- coding: utf-8 -*-
+"""
+HBM 프로젝트 - 크롤링 페이지 Streamlit 앱 (성능 최적화 버전)
+"""
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import os, sys
+import time as time_module
 from dotenv import load_dotenv
 
 CURRENT_DIR = os.path.dirname(__file__)
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__)) 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from crawling import InsightPageAPI
 
+# ============================================================================
 # 페이지 설정
+# ============================================================================
 st.set_page_config(
-    page_title="크롤링 페이지",
-    page_icon="📊",
-    layout="wide"
+    page_title="데이터 수집",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
+# ============================================================================
+# CSS 스타일
+# ============================================================================
 st.markdown("""
 <style>
     .main-header {
-        font-size: 2rem;
+        font-size: 2.5rem;
         font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
         margin-bottom: 2rem;
     }
-    .stButton>button {
-        width: 100%;
-        background-color: #ff4b4b;
-        color: white;
+    .sub-header {
+        font-size: 1.5rem;
         font-weight: bold;
-        padding: 0.5rem 1rem;
+        color: #2c3e50;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+    }
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 1rem;
         border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
+    .success-box {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 0.25rem;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    .warning-box {
+        background-color: #fff3cd;
+        border: 1px solid #ffeeba;
+        border-radius: 0.25rem;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    /* 탭 색상 변경 */
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
+        border-bottom-color: #1f77b4 !important;
+        color: #1f77b4 !important;
+    }
+    .stTabs [data-baseweb="tab-list"] button:hover {
+        color: #1f77b4 !important;
+    }
+    /* 슬라이더 색상 변경 */
+    .stSlider > div > div > div > div {
+        background-color: #1f77b4 !important;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+        background-color: #1f77b4 !important;
+    }
+    input[type="range"]::-moz-range-thumb {
+        background-color: #1f77b4 !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
+# ============================================================================
+# 메인 앱
+# ============================================================================
 
 def main():
-    st.markdown('<div class="main-header">크롤링 페이지</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">데이터 수집</div>', unsafe_allow_html=True)
     
     # 탭 생성
-    tab1, tab2 = st.tabs(["크롤링API", "학습데이터"])
+    tab1, tab2 = st.tabs(["키워드", " "])
     
     with tab1:
-        st.markdown("### 크롤링API (설정세션)")
+        st.markdown('<div class="sub-header">📊 키워드 크롤링</div>', unsafe_allow_html=True)
         
         # API 설정
         api_key = st.text_input(
             "API 키",
-            value=os.getenv("INSIGHT_API_KEY", ""),  # ← .env 값
+            value=os.getenv("INSIGHT_API_KEY", ""),
             type="password",
             key="api_key_tab1",
         )
         
         # 검색 설정
         company_name = st.text_input(
-            "분석 대상 기업",
-            placeholder="예: 삼성전자, 삼성"
+            "수집 키워드",
+            placeholder="예: 삼성전자, 하이닉스, 반도체"
         )
         
         # 크롤링 설정
-        col_setting1, col_setting2 = st.columns(2)
+        col_setting1, col_setting2, col_setting3 = st.columns(3)
         
         with col_setting1:
             page_num = st.number_input(
                 "페이지 수",
                 min_value=1,
-                max_value=50,
+                max_value=100,
                 value=1,
-                help="크롤링할 페이지 수 (1페이지 = 지정한 개수만큼 문서)"
+                help="크롤링할 페이지 수 (페이지당 최대 10,000개)"
             )
         
         with col_setting2:
@@ -79,12 +132,44 @@ def main():
                 "페이지당 문서 수",
                 min_value=100,
                 max_value=10000,
-                value=1000,
+                value=10000,
                 step=100,
                 help="한 페이지당 가져올 문서 수 (최대 10,000개)"
             )
         
-        st.info(f"📊 총 최대 수집 문서 수: **{page_num * crawl_size:,}개**")
+        with col_setting3:
+            enable_checkpoint = st.checkbox(
+                "중간 저장",
+                value=True,
+                help="페이지마다 중간 결과를 저장 (중단 시 재개 가능)"
+            )
+        
+        # ⭐ 성능 최적화: 페이지 간 대기 시간 설정 추가
+        col_delay1, col_delay2 = st.columns(2)
+        
+        with col_delay1:
+            enable_delay = st.checkbox(
+                "페이지 간 대기",
+                value=True,
+                help="Rate Limiting 방지를 위해 페이지 사이에 대기 (권장)"
+            )
+        
+        with col_delay2:
+            if enable_delay:
+                delay_seconds = st.number_input(
+                    "대기 시간 (초)",
+                    min_value=1,
+                    max_value=30,
+                    value=5,
+                    help="페이지 사이 대기 시간 (권장: 3~5초)"
+                )
+            else:
+                delay_seconds = 0
+        
+        # 예상 정보 표시
+        st.info(f"💡 총 문서 수: **{page_num * crawl_size:,}개**")
+        
+        st.markdown("---")
         
         # 날짜 선택
         col_date1, col_date2 = st.columns(2)
@@ -111,7 +196,7 @@ def main():
             if not api_key:
                 st.error("❌ API 키를 입력하세요.")
             elif not company_name:
-                st.error("❌ 분석 대상 기업을 입력하세요.")
+                st.error("❌ 키워드를 입력하세요.")
             elif start_date > end_date:
                 st.error("❌ Start Date가 End Date보다 나중입니다. 날짜를 다시 확인하세요.")
             else:
@@ -128,6 +213,9 @@ def main():
                     main_keyword = keywords[0]
                     synonyms = keywords if len(keywords) > 1 else []
                     
+                    # 중간 저장 파일명
+                    checkpoint_file = f"crawl_checkpoint_{main_keyword}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                    
                     status_text.text("🔍 크롤링 시작...")
                     progress_bar.progress(10)
                     
@@ -138,6 +226,10 @@ def main():
                         st.text(f"  - 기간: {start_date} ~ {end_date}")
                         st.text(f"  - 페이지 수: {page_num}")
                         st.text(f"  - 페이지당 문서 수: {crawl_size:,}")
+                        if enable_checkpoint:
+                            st.text(f"  - 중간 저장: 활성화 ({checkpoint_file})")
+                        if enable_delay:
+                            st.text(f"  - 페이지 간 대기: {delay_seconds}초 (Rate Limiting 방지)")
                     
                     progress_bar.progress(30)
                     
@@ -146,24 +238,67 @@ def main():
                     
                     # 크롤링 실행
                     all_documents = []
+                    start_time = time_module.time()
+                    
+                    # ⭐ 성능 최적화: 재시도 설정
+                    max_retries = 3  # 최대 재시도 횟수
                     
                     for page in range(page_num):
+                        page_start = time_module.time()
+                        
                         page_progress = 30 + (page / page_num * 60)
                         progress_bar.progress(int(page_progress))
+                        
+                        # 예상 남은 시간 계산
+                        if page > 0:
+                            elapsed = time_module.time() - start_time
+                            avg_time_per_page = elapsed / page
+                            remaining_pages = page_num - page
+                            eta_seconds = avg_time_per_page * remaining_pages
+                            eta_str = f"{int(eta_seconds // 60)}분 {int(eta_seconds % 60)}초"
+                        else:
+                            eta_str = "계산 중..."
+                        
+                        status_text.text(f"📥 페이지 {page + 1}/{page_num} 수집 중... (예상 남은 시간: {eta_str})")
                         
                         with log_container:
                             st.text(f"[{datetime.now().strftime('%H:%M:%S')}] 페이지 {page + 1}/{page_num} 크롤링 중...")
                         
-                        result = api.get_documents(
-                            start_date=start_date.strftime("%Y-%m-%d"),
-                            end_date=end_date.strftime("%Y-%m-%d"),
-                            keyword=main_keyword,
-                            synonyms=synonyms,
-                            size=crawl_size,
-                            from_index=crawl_size * page + 1
-                        )
+                        # ⭐ 성능 최적화: 재시도 로직
+                        documents = None
+                        api_elapsed = 0
                         
-                        documents = result.get('documents', [])
+                        for attempt in range(max_retries):
+                            try:
+                                api_start = time_module.time()
+                                
+                                result = api.get_documents(
+                                    start_date=start_date.strftime("%Y-%m-%d"),
+                                    end_date=end_date.strftime("%Y-%m-%d"),
+                                    keyword=main_keyword,
+                                    synonyms=synonyms,
+                                    size=crawl_size,
+                                    from_index=crawl_size * page + 1
+                                )
+                                
+                                api_elapsed = time_module.time() - api_start
+                                documents = result.get('documents', [])
+                                
+                                # 성공하면 재시도 루프 종료
+                                break
+                                
+                            except Exception as e:
+                                if attempt < max_retries - 1:
+                                    wait_time = 2 ** attempt  # 지수 백오프: 1초, 2초, 4초
+                                    with log_container:
+                                        st.text(f"  ⚠️ API 오류 (재시도 {attempt + 1}/{max_retries}): {str(e)}")
+                                        st.text(f"  ⏰ {wait_time}초 후 재시도...")
+                                    time_module.sleep(wait_time)
+                                else:
+                                    # 최대 재시도 횟수 초과
+                                    with log_container:
+                                        st.text(f"  ❌ 최대 재시도 초과: {str(e)}")
+                                    raise e
                         
                         if not documents:
                             with log_container:
@@ -172,18 +307,55 @@ def main():
                         
                         all_documents.extend(documents)
                         
+                        # 페이지 처리 시간 계산
+                        page_elapsed = time_module.time() - page_start
+                        
+                        # ⭐ 성능 진단: API 응답 시간 체크
+                        if api_elapsed > 30:
+                            with log_container:
+                                st.text(f"  ⚠️ 경고: API 응답이 느립니다 ({api_elapsed:.1f}초)")
+                                st.text(f"  💡 Rate Limiting 가능성 - 대기 시간을 늘리거나 크기를 줄이세요")
+                        
                         with log_container:
-                            st.text(f"[{datetime.now().strftime('%H:%M:%S')}] 페이지 {page + 1}: {len(documents):,}개 문서 수집")
+                            st.text(f"[{datetime.now().strftime('%H:%M:%S')}] 페이지 {page + 1}: {len(documents):,}개 수집 완료 ({page_elapsed:.1f}초)")
+                        
+                        # 중간 저장
+                        if enable_checkpoint and documents:
+                            df_temp = pd.DataFrame(documents)
+                            if page == 0:
+                                df_temp.to_csv(checkpoint_file, index=False, encoding='utf-8-sig')
+                            else:
+                                df_temp.to_csv(checkpoint_file, mode='a', header=False, index=False, encoding='utf-8-sig')
+                            
+                            with log_container:
+                                st.text(f"[{datetime.now().strftime('%H:%M:%S')}]   → 중간 저장 완료 (누적: {len(all_documents):,}개)")
+                        
+                        # ⭐ 성능 최적화: 페이지 간 대기 (Rate Limiting 방지)
+                        if enable_delay and page < page_num - 1:  # 마지막 페이지가 아니면
+                            with log_container:
+                                st.text(f"[{datetime.now().strftime('%H:%M:%S')}]   ⏰ {delay_seconds}초 대기 중... (Rate Limiting 방지)")
+                            time_module.sleep(delay_seconds)
                     
+                    total_elapsed = time_module.time() - start_time
                     progress_bar.progress(100)
                     status_text.text("✅ 크롤링 완료!")
                     
                     with log_container:
                         st.text(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 크롤링 완료")
                         st.text(f"  - 총 문서 수: {len(all_documents):,}개")
+                        st.text(f"  - 소요 시간: {int(total_elapsed // 60)}분 {int(total_elapsed % 60)}초")
+                        st.text(f"  - 평균 속도: {len(all_documents) / total_elapsed:.0f}개/초")
                     
                     if len(all_documents) > 0:
-                        st.success(f"✅ 크롤링 완료! {len(all_documents):,}개 문서를 수집했습니다.")
+                        st.markdown(f"""
+                        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                            ✅ <strong>크롤링 완료!</strong><br>
+                            • 수집 문서: {len(all_documents):,}개<br>
+                            • 소요 시간: {int(total_elapsed // 60)}분 {int(total_elapsed % 60)}초<br>
+                            • 평균 속도: {len(all_documents) / total_elapsed:.0f}개/초
+                            {f'<br>• 중간 저장: {checkpoint_file}' if enable_checkpoint else ''}
+                        </div>
+                        """, unsafe_allow_html=True)
                         
                         # 데이터프레임 생성
                         df = pd.DataFrame(all_documents)
@@ -289,90 +461,6 @@ def main():
                 mime="text/csv",
                 key="download_saved"
             )
-    
-    with tab2:
-        st.markdown("### 🧹 학습 데이터 준비 및 검토")
-        
-        # 1. 데이터 로드 확인 및 업로드 기능
-        if 'crawled_data' not in st.session_state or st.session_state['crawled_data'] is None:
-            st.warning("⚠️ 먼저 '크롤링API' 탭에서 데이터를 수집하거나, CSV 파일을 업로드하여 데이터를 로드하세요.")
-            
-            # 파일 업로드 옵션
-            uploaded_file = st.file_uploader("로컬에서 전처리된 학습 데이터 CSV 업로드", type=['csv'], key='train_upload')
-            
-            if uploaded_file is not None:
-                # 업로드된 데이터를 임시로 session_state에 저장하여 사용
-                try:
-                    df_loaded = pd.read_csv(uploaded_file)
-                    st.session_state['processed_data'] = df_loaded
-                    st.success(f"✅ 파일 로드 완료. 총 {len(df_loaded):,}개 문서.")
-                except Exception as e:
-                    st.error(f"파일 로드 중 오류 발생: {e}")
-            
-            if st.session_state.get('processed_data') is None and st.session_state.get('crawled_data') is None:
-                return # 데이터가 없으면 탭 진행 중단
-        
-        # 크롤링된 데이터 또는 업로드된 데이터 사용
-        df = st.session_state.get('processed_data') if 'processed_data' in st.session_state else st.session_state.get('crawled_data')
-        
-        if df is None:
-            return
-
-        # 2. KPI Metrics (현재 데이터 상태)
-        total_rows = len(df)
-        # 'sentiment' 컬럼 존재 여부로 라벨링 완료 상태 추정 (1_감성라벨부착.ipynb 결과)
-        has_sentiment = 'sentiment' in df.columns
-        
-        col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
-        with col_kpi1:
-            st.metric("총 데이터 행 수", f"{total_rows:,} 개")
-        with col_kpi2:
-            st.metric("감성 라벨 존재 여부", "✅ 있음" if has_sentiment else "❌ 없음")
-        with col_kpi3:
-            st.metric("다음 단계 준비 상태", "✅ 학습 준비 완료" if has_sentiment else "⚠️ 라벨링 단계 필요")
-
-        st.markdown("---")
-        
-        # 3. 데이터 클리닝/전처리 설정 (1_감성라벨부착.ipynb 및 전처리 단계 반영)
-        st.markdown("### ⚙️ 데이터 클리닝 및 전처리 설정")
-        with st.expander("전처리 옵션 설정 (실제 적용 로직은 백엔드에서 구현 필요)", expanded=False):
-            
-            st.subheader("1. 중복/노이즈 제거")
-            col_clean1, col_clean2 = st.columns(2)
-            with col_clean1:
-                dedup_option = st.checkbox("문서 중복 제거", value=True, help="제목/본문이 완전히 동일한 문서를 제거합니다.")
-                short_filter = st.slider("최소 길이 필터 (단어)", min_value=5, max_value=50, value=10, help="이 길이 미만의 문장을 제거합니다.", key='min_len_filter')
-            with col_clean2:
-                # 불용어 처리 설정
-                st.text_area("추가 불용어 목록", value="기자, 관련, 이날, 현재, 것으로", height=100, key='stopwords_list')
-                
-            st.subheader("2. 텍스트 정규화")
-            normalize_text = st.checkbox("문자 정규화 (이모지, 특수기호)", value=True, key='normalize_check')
-
-        st.markdown("---")
-        
-        # 4. 데이터 미리보기
-        st.markdown("### 📋 데이터 미리보기")
-        st.dataframe(df.head(10), use_container_width=True)
-        
-        # 5. 최종 작업 버튼
-        st.markdown("---")
-        
-        # 데이터프레임을 CSV로 변환 (다운로드를 위해)
-        csv_data = df.to_csv(index=False, encoding='utf-8-sig')
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"training_data_{timestamp}.csv"
-        
-        st.download_button(
-            label="💾 전처리된 학습 데이터 다운로드 (CSV)", 
-            data=csv_data,
-            file_name=filename,
-            mime="text/csv",
-            use_container_width=True,
-            type='secondary'
-        )
-        st.caption("이 파일을 다운로드하여 `1_감성라벨부착.ipynb` 등의 학습 단계에 사용하세요.")
-
 
 if __name__ == "__main__":
     main()

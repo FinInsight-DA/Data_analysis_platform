@@ -29,7 +29,6 @@ from tqdm import tqdm
 # ============================================================================
 st.set_page_config(
     page_title="LDA 토픽 모델링",
-    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -85,6 +84,7 @@ class LDATopicModeling:
         self.stop_words = stop_words
         self.min_noun_length = min_noun_length
         self.processed_sentences = None
+        self.valid_indices = None  # 유효한 문장의 원본 인덱스 저장
         self.dictionary = None
         self.corpus = None
         self.models = {}
@@ -96,6 +96,7 @@ class LDATopicModeling:
         """형태소 분석"""
         if use_cache and 'preprocessed_data' in st.session_state:
             self.processed_sentences = st.session_state['preprocessed_data']
+            self.valid_indices = st.session_state['valid_indices']
             return
         
         okt = Okt()
@@ -118,9 +119,15 @@ class LDATopicModeling:
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        self.processed_sentences = []
+        all_processed = []
+        valid_indices = []
+        
         for i, text in enumerate(self.df['sentence']):
-            self.processed_sentences.append(clean_text(text))
+            cleaned = clean_text(text)
+            all_processed.append(cleaned)
+            if len(cleaned) > 0:
+                valid_indices.append(i)
+            
             if i % 100 == 0:
                 progress_bar.progress((i + 1) / len(self.df))
                 status_text.text(f"형태소 분석 중... {i+1}/{len(self.df)}")
@@ -128,10 +135,13 @@ class LDATopicModeling:
         progress_bar.progress(1.0)
         status_text.text(f"형태소 분석 완료: {len(self.df):,}개")
         
-        self.processed_sentences = [s for s in self.processed_sentences if len(s) > 0]
+        # 유효한 문장만 저장
+        self.processed_sentences = [all_processed[i] for i in valid_indices]
+        self.valid_indices = valid_indices
         
         # 캐시 저장
         st.session_state['preprocessed_data'] = self.processed_sentences
+        st.session_state['valid_indices'] = self.valid_indices
     
     def create_dict_corpus(self, no_below, no_above, keep_n):
         """Dictionary & Corpus 생성"""
@@ -195,9 +205,14 @@ class LDATopicModeling:
     def get_result_df(self, n_topics):
         """결과 데이터프레임 생성"""
         topics = self.topics_dict[n_topics]
-        result_df = self.df.iloc[:len(topics)].copy()
+        
+        # 유효한 인덱스만 사용하여 데이터프레임 생성
+        result_df = self.df.iloc[self.valid_indices].copy()
         result_df['lda_topic'] = topics
+        
+        # 토픽이 할당되지 않은 문서 제거
         result_df = result_df[result_df['lda_topic'] != -1]
+        
         return result_df
 
 # ============================================================================
@@ -245,81 +260,77 @@ def calculate_elbow_point(scores_dict, maximize=True):
 # 시각화 함수
 # ============================================================================
 def create_metrics_comparison_chart(coherence_scores, perplexity_scores):
-    """Coherence & Perplexity 비교 차트 (엘보우 포인트 포함)"""
+    """Coherence & Perplexity 비교 차트 - 파란색 계열로 통일"""
     from plotly.subplots import make_subplots
     
-    # 엘보우 포인트 계산
+    # 엘보우 포인트 계산 (효율성 균형점)
     coherence_elbow = calculate_elbow_point(coherence_scores, maximize=True)
     perplexity_elbow = calculate_elbow_point(perplexity_scores, maximize=False)
+    
+    # 최고 성능 값 계산
+    best_coherence_topic = max(coherence_scores.keys(), key=lambda k: coherence_scores[k])
+    best_perplexity_topic = min(perplexity_scores.keys(), key=lambda k: perplexity_scores[k])
     
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=(
-            f'Coherence (높을수록 좋음) - 추천: {coherence_elbow}개 토픽',
-            f'Perplexity (낮을수록 좋음) - 추천: {perplexity_elbow}개 토픽'
+            f'Coherence (높을수록 좋음) - 🔷효율: {coherence_elbow}개, 🔵최고: {best_coherence_topic}개',
+            f'Perplexity (낮을수록 좋음) - 🔷효율: {perplexity_elbow}개, 🔵최고: {best_perplexity_topic}개'
         ),
         horizontal_spacing=0.15
     )
     
-    # Coherence 바 차트
+    # Coherence 바 차트 - 파란색 계열로 통일
+    colors_coherence = []
+    for k in coherence_scores.keys():
+        if k == best_coherence_topic and k == coherence_elbow:
+            colors_coherence.append('#0D47A1')  # 둘 다 해당 - 가장 진한 파랑
+        elif k == coherence_elbow:
+            colors_coherence.append('#64B5F6')  # 효율성 - 밝은 파랑 (골드 대신)
+        elif k == best_coherence_topic:
+            colors_coherence.append('#1565C0')  # 최고 성능 - 진한 파랑
+        else:
+            colors_coherence.append('#90CAF9')  # 일반 - 연한 파랑
+    
     fig.add_trace(
         go.Bar(
             x=list(coherence_scores.keys()),
             y=list(coherence_scores.values()),
             text=[f"{v:.4f}" for v in coherence_scores.values()],
             textposition='auto',
-            marker_color=['#1f77b4' if k != coherence_elbow else '#2ca02c' for k in coherence_scores.keys()],
+            textfont=dict(color='white', size=11, family='Arial'),
+            marker_color=colors_coherence,
+            marker_line=dict(width=1.5, color='white'),
             name='Coherence'
         ),
         row=1, col=1
     )
     
-    # Coherence 엘보우 포인트 표시
-    if coherence_elbow:
-        fig.add_trace(
-            go.Scatter(
-                x=[coherence_elbow],
-                y=[coherence_scores[coherence_elbow]],
-                mode='markers+text',
-                marker=dict(size=15, color='red', symbol='star'),
-                text=['★ 추천'],
-                textposition='top center',
-                textfont=dict(size=12, color='red'),
-                name='Elbow Point',
-                showlegend=False
-            ),
-            row=1, col=1
-        )
+    # Perplexity 바 차트 - 파란색 계열로 통일
+    colors_perplexity = []
+    for k in perplexity_scores.keys():
+        if k == best_perplexity_topic and k == perplexity_elbow:
+            colors_perplexity.append('#0D47A1')  # 둘 다 해당 - 가장 진한 파랑
+        elif k == perplexity_elbow:
+            colors_perplexity.append('#64B5F6')  # 효율성 - 밝은 파랑
+        elif k == best_perplexity_topic:
+            colors_perplexity.append('#1565C0')  # 최고 성능 - 진한 파랑
+        else:
+            colors_perplexity.append('#90CAF9')  # 일반 - 연한 파랑
     
-    # Perplexity 바 차트
     fig.add_trace(
         go.Bar(
             x=list(perplexity_scores.keys()),
             y=list(perplexity_scores.values()),
             text=[f"{v:.2f}" for v in perplexity_scores.values()],
             textposition='auto',
-            marker_color=['#ff7f0e' if k != perplexity_elbow else '#2ca02c' for k in perplexity_scores.keys()],
+            textfont=dict(color='white', size=11, family='Arial'),
+            marker_color=colors_perplexity,
+            marker_line=dict(width=1.5, color='white'),
             name='Perplexity'
         ),
         row=1, col=2
     )
-    
-    # Perplexity 엘보우 포인트 표시
-    if perplexity_elbow:
-        fig.add_trace(
-            go.Scatter(
-                x=[perplexity_elbow],
-                y=[perplexity_scores[perplexity_elbow]],
-                mode='markers+text',
-                marker=dict(size=15, color='red', symbol='star'),
-                text=['★ 추천'],
-                textposition='top center',
-                textfont=dict(size=12, color='red'),
-                name='Elbow Point',
-                showlegend=False
-            ),
-            row=1, col=2
-        )
     
     fig.update_xaxes(title_text="토픽 개수", row=1, col=1)
     fig.update_xaxes(title_text="토픽 개수", row=1, col=2)
@@ -329,35 +340,98 @@ def create_metrics_comparison_chart(coherence_scores, perplexity_scores):
     fig.update_layout(
         height=450,
         showlegend=False,
-        title_text="토픽 개수별 평가 지표 비교 (★ = 엘보우 포인트)"
+        title_text="토픽 개수별 평가 지표 비교 (🔷=효율성 균형점, 🔵=최고 성능)",
+        title_font=dict(size=16, color='#1565C0', family='Arial'),
+        plot_bgcolor='#FAFAFA',
+        paper_bgcolor='white',
+        font=dict(family='Arial', color='#37474F')
+    )
+    
+    # 그리드 라인 스타일
+    fig.update_xaxes(
+        gridcolor='#E0E0E0',
+        gridwidth=0.5,
+        showline=True,
+        linewidth=1,
+        linecolor='#BDBDBD'
+    )
+    fig.update_yaxes(
+        gridcolor='#E0E0E0',
+        gridwidth=0.5,
+        showline=True,
+        linewidth=1,
+        linecolor='#BDBDBD'
     )
     
     return fig
 
 def create_coherence_chart(coherence_scores):
     """Coherence 점수 비교 차트 (호환성 유지)"""
+    # 파란색 계열 그라데이션 생성
+    n = len(coherence_scores)
+    colors = []
+    for i in range(n):
+        ratio = i / max(n - 1, 1)
+        r = int(26 + (179 - 26) * ratio)   # 26(#1a) → 179(#b3)
+        g = int(84 + (217 - 84) * ratio)   # 84(#54) → 217(#d9)
+        b = int(144 + (255 - 144) * ratio) # 144(#90) → 255(#ff)
+        colors.append(f'rgb({r},{g},{b})')
+    
     fig = go.Figure(data=[
         go.Bar(
             x=list(coherence_scores.keys()),
             y=list(coherence_scores.values()),
             text=[f"{v:.4f}" for v in coherence_scores.values()],
             textposition='auto',
-            marker_color='#1f77b4'
+            marker=dict(
+                color=colors,
+                line=dict(color='white', width=2)
+            )
         )
     ])
     
     fig.update_layout(
-        title='토픽 개수별 Coherence 점수',
-        xaxis_title='토픽 개수',
-        yaxis_title='Coherence 점수',
-        height=400
+        title=dict(
+            text='토픽 개수별 Coherence 점수',
+            font=dict(size=18, color='#2c3e50', family='Arial'),
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis=dict(
+            title='토픽 개수',
+            tickfont=dict(size=12, color='#2c3e50'),
+            showgrid=False,
+            showline=False
+        ),
+        yaxis=dict(
+            title='Coherence 점수',
+            title_font=dict(size=13, color='#7f8c8d'),
+            tickfont=dict(size=12, color='#7f8c8d'),
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#ecf0f1',
+            showline=False
+        ),
+        height=400,
+        plot_bgcolor='white',
+        paper_bgcolor='white'
     )
     
     return fig
 
 def create_topic_distribution_chart(result_df):
-    """토픽별 문서 수 분포"""
+    """토픽별 문서 수 분포 - 파란색 계열 그라데이션"""
     topic_counts = result_df['lda_topic'].value_counts().sort_index()
+    
+    # 파란색 계열 그라데이션 생성
+    n = len(topic_counts)
+    colors = []
+    for i in range(n):
+        ratio = i / max(n - 1, 1)
+        r = int(26 + (179 - 26) * ratio)   # 26(#1a) → 179(#b3)
+        g = int(84 + (217 - 84) * ratio)   # 84(#54) → 217(#d9)
+        b = int(144 + (255 - 144) * ratio) # 144(#90) → 255(#ff)
+        colors.append(f'rgb({r},{g},{b})')
     
     fig = go.Figure(data=[
         go.Bar(
@@ -365,15 +439,39 @@ def create_topic_distribution_chart(result_df):
             y=topic_counts.values,
             text=topic_counts.values,
             textposition='auto',
-            marker_color='#ff7f0e'
+            textfont=dict(color='white', size=11, family='Arial'),
+            marker=dict(
+                color=colors,
+                line=dict(width=1.5, color='white')
+            )
         )
     ])
     
     fig.update_layout(
-        title='토픽별 문서 수',
-        xaxis_title='토픽 번호',
-        yaxis_title='문서 수',
-        height=400
+        title=dict(
+            text='토픽별 문서 수',
+            font=dict(size=18, color='#2c3e50', family='Arial'),
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis=dict(
+            title='토픽 번호',
+            tickfont=dict(size=12, color='#2c3e50'),
+            showgrid=False,
+            showline=False
+        ),
+        yaxis=dict(
+            title='문서 수',
+            title_font=dict(size=13, color='#7f8c8d'),
+            tickfont=dict(size=12, color='#7f8c8d'),
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#ecf0f1',
+            showline=False
+        ),
+        height=400,
+        plot_bgcolor='white',
+        paper_bgcolor='white'
     )
     
     return fig
@@ -396,7 +494,7 @@ def create_topic_keywords_table(model, n_topics, top_n=10):
 # ============================================================================
 def main():
     # 헤더
-    st.markdown('<div class="main-header">📊 LDA 토픽 모델링</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">LDA 토픽 모델링</div>', unsafe_allow_html=True)
     st.markdown("---")
     
     # ============================================================================
@@ -410,6 +508,27 @@ def main():
         help="LDA 토픽 모델링을 수행할 CSV 파일"
     )
     
+    # ============================================================================
+    # 파일 변경 감지 및 캐시 초기화
+    # ============================================================================
+    current_file_name = uploaded_file.name if uploaded_file else None
+    
+    if 'prev_file_name' not in st.session_state:
+        st.session_state['prev_file_name'] = None
+    
+    # 파일이 바뀌면 캐시 초기화
+    if current_file_name != st.session_state['prev_file_name']:
+        if 'preprocessed_data' in st.session_state:
+            del st.session_state['preprocessed_data']
+        if 'valid_indices' in st.session_state:
+            del st.session_state['valid_indices']
+        if 'lda' in st.session_state:
+            del st.session_state['lda']
+        if 'results' in st.session_state:
+            del st.session_state['results']
+        
+        st.session_state['prev_file_name'] = current_file_name
+    
     if uploaded_file is None:
         st.info("⬆️ CSV 파일을 업로드해주세요.")
         return
@@ -417,7 +536,11 @@ def main():
     # 데이터 로드
     try:
         df = pd.read_csv(uploaded_file)
-        st.success(f"✅ 데이터 로드 완료: {len(df):,}개 문서")
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            ✅ <strong>데이터 로드 완료:</strong> {len(df):,}개 문서
+        </div>
+        """, unsafe_allow_html=True)
         
         if 'sentence' not in df.columns:
             st.error("❌ 'sentence' 컬럼이 없습니다.")
@@ -460,23 +583,10 @@ def main():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        passes = st.slider(
-            "Passes",
-            min_value=1,
-            max_value=20,
-            value=5,
-            help="전체 코퍼스를 몇 번 반복할지"
-        )
+        passes = st.slider("Passes", 1, 50, 10, help="전체 코퍼스를 몇 번 반복할지")
     
     with col2:
-        iterations = st.slider(
-            "Iterations",
-            min_value=10,
-            max_value=200,
-            value=50,
-            step=10,
-            help="각 문서당 반복 횟수"
-        )
+        iterations = st.slider("Iterations", 50, 500, 100, help="각 문서를 몇 번 업데이트할지")
     
     with col3:
         alpha_mode = st.radio(
@@ -535,87 +645,87 @@ def main():
     
     st.markdown("---")
     
-    # 전처리 파라미터
-    st.markdown("**전처리 파라미터**")
+    # Dictionary 필터링
+    st.markdown("**Dictionary 필터링**")
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        no_below = st.slider(
-            "최소 문서 빈도",
+        no_below = st.number_input(
+            "no_below",
             min_value=1,
-            max_value=20,
+            max_value=100,
             value=5,
-            help="단어가 최소 몇 개 문서에 나타나야 하는지"
+            help="최소 문서 출현 빈도"
         )
     
     with col2:
         no_above = st.slider(
-            "최대 문서 비율",
-            min_value=0.1,
-            max_value=1.0,
-            value=0.5,
-            step=0.1,
-            help="단어가 최대 몇 %의 문서에 나타날 수 있는지"
+            "no_above",
+            0.0, 1.0, 0.5,
+            help="최대 문서 출현 비율"
         )
     
     with col3:
-        keep_n = st.slider(
-            "최대 단어 수",
-            min_value=100,
-            max_value=5000,
-            value=1000,
-            step=100,
-            help="Dictionary에 유지할 최대 단어 개수"
+        keep_n = st.number_input(
+            "keep_n",
+            min_value=1000,
+            max_value=100000,
+            value=10000,
+            step=1000,
+            help="유지할 최대 단어 수"
         )
     
+    st.markdown("---")
+    
+    # 불용어 관리
+    st.markdown("**불용어 관리**")
+    
+    with st.expander("📝 불용어 편집 (선택사항)"):
+        st.write("**현재 기본 불용어:**")
+        stop_words_text = st.text_area(
+            "불용어 목록 (쉼표로 구분)",
+            value=', '.join(sorted(DEFAULT_STOP_WORDS)),
+            height=150,
+            help="불용어를 쉼표로 구분하여 입력하세요"
+        )
+        
+        stop_words = set([w.strip() for w in stop_words_text.split(',') if w.strip()])
+        st.info(f"✅ 총 {len(stop_words)}개 불용어 설정")
+    
+    # 형태소 분석 옵션
     col1, col2 = st.columns(2)
     
     with col1:
         min_noun_length = st.slider(
             "최소 명사 길이",
-            min_value=1,
-            max_value=5,
-            value=2,
-            help="추출할 명사의 최소 글자 수"
+            1, 5, 2,
+            help="이 길이보다 짧은 명사는 제외"
         )
     
     with col2:
         use_cache = st.checkbox(
-            "전처리 결과 캐시 사용",
+            "캐시 사용",
             value=True,
-            help="이전 전처리 결과 재사용 (같은 세션 내)"
+            help="이전 형태소 분석 결과 재사용"
         )
     
-    # 불용어 설정
-    with st.expander("🔧 불용어 설정 (선택사항)"):
-        st.write("**기본 불용어 목록**")
-        st.text(', '.join(sorted(DEFAULT_STOP_WORDS)))
-        
-        additional_stopwords = st.text_area(
-            "추가 불용어 (쉼표로 구분)",
-            value="",
-            help="제외할 추가 단어들을 입력하세요"
-        )
-        
-        if additional_stopwords:
-            add_words = {w.strip() for w in additional_stopwords.split(',') if w.strip()}
-            stop_words = DEFAULT_STOP_WORDS | add_words
-            st.info(f"총 {len(stop_words)}개 불용어 사용")
-        else:
-            stop_words = DEFAULT_STOP_WORDS
-    
-    # 현재 설정 요약
-    with st.expander("📋 현재 설정 요약"):
+    # 파라미터 요약
+    with st.expander("📋 설정 요약"):
         st.write(f"""
-        **토픽 모델링 설정**
-        - 토픽 개수: {topic_numbers}
-        - Passes: {passes}, Iterations: {iterations}
-        - Alpha: {alpha}, Eta: {eta}
+        **토픽 개수:** {', '.join(map(str, topic_numbers))}
         
-        **전처리 설정**
-        - 최소 문서 빈도: {no_below}
-        - 최대 문서 비율: {no_above}
-        - 최대 단어 수: {keep_n}
+        **LDA 파라미터:**
+        - Passes: {passes}
+        - Iterations: {iterations}
+        - Alpha: {alpha}
+        - Eta: {eta}
+        
+        **Dictionary 필터:**
+        - no_below: {no_below}
+        - no_above: {no_above}
+        - keep_n: {keep_n:,}
+        
+        **전처리:**
         - 최소 명사 길이: {min_noun_length}
         - 불용어: {len(stop_words)}개
         """)
@@ -625,33 +735,37 @@ def main():
     # ============================================================================
     # 3. 학습 실행
     # ============================================================================
-    if st.button("🚀 LDA 학습 시작", type="primary", use_container_width=True):
+    st.markdown('<div class="sub-header">🚀 3. 학습 실행</div>', unsafe_allow_html=True)
+    
+    if st.button("학습 시작", type="primary", use_container_width=True):
         start_time = time.time()
         
-        # LDA 객체 생성
+        # 초기화
         lda = LDATopicModeling(df, stop_words, min_noun_length)
         
         # 전처리
-        st.markdown("### 1️⃣ 형태소 분석")
         with st.spinner("형태소 분석 중..."):
             lda.preprocess(use_cache=use_cache)
-        st.success(f"✅ 전처리 완료: {len(lda.processed_sentences):,}개 문장")
+        
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            ✅ <strong>전처리 완료:</strong> {len(lda.processed_sentences):,}개 문장
+        </div>
+        """, unsafe_allow_html=True)
         
         # Dictionary & Corpus
-        st.markdown("### 2️⃣ Dictionary & Corpus 생성")
-        with st.spinner("생성 중..."):
+        with st.spinner("Dictionary & Corpus 생성 중..."):
             original_size, filtered_size = lda.create_dict_corpus(no_below, no_above, keep_n)
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("원본 단어 수", f"{original_size:,}")
-        with col2:
-            st.metric("필터링 후", f"{filtered_size:,}")
-        with col3:
-            st.metric("Corpus 크기", f"{len(lda.corpus):,}")
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            ✅ <strong>Dictionary 생성 완료</strong><br>
+            원본: {original_size:,}개 → 필터링 후: {filtered_size:,}개
+        </div>
+        """, unsafe_allow_html=True)
         
-        # LDA 학습
-        st.markdown("### 3️⃣ LDA 학습")
+        # 학습
+        st.markdown("**LDA 학습 진행**")
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -681,7 +795,11 @@ def main():
         
         # 실행 시간
         elapsed = time.time() - start_time
-        st.success(f"🎉 학습 완료! (총 소요 시간: {elapsed/60:.1f}분)")
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            🎉 <strong>학습 완료!</strong> (총 소요 시간: {elapsed/60:.1f}분)
+        </div>
+        """, unsafe_allow_html=True)
         
         st.markdown("---")
     
@@ -702,17 +820,65 @@ def main():
         st.markdown("---")
         st.markdown("**평가 지표 비교**")
         
-        # 엘보우 포인트 계산
+        # 엘보우 포인트 계산 (효율성 균형점)
         coherence_elbow = calculate_elbow_point(lda.coherence_scores, maximize=True)
         perplexity_elbow = calculate_elbow_point(lda.perplexity_scores, maximize=False)
         
-        # 추천 메시지
-        if coherence_elbow and perplexity_elbow:
-            if coherence_elbow == perplexity_elbow:
-                st.success(f"🎯 **추천 토픽 개수: {coherence_elbow}개** (Coherence와 Perplexity 모두 최적)")
-            else:
-                st.info(f"🎯 **추천 토픽 개수**\n- Coherence 기준: {coherence_elbow}개 ⭐\n- Perplexity 기준: {perplexity_elbow}개")
-                st.caption("💡 두 지표가 다를 경우, 도메인 전문가의 판단이나 추가 분석이 필요합니다.")
+        # 최고 성능 계산
+        best_coherence_topic = max(lda.coherence_scores.keys(), key=lambda k: lda.coherence_scores[k])
+        best_perplexity_topic = min(lda.perplexity_scores.keys(), key=lambda k: lda.perplexity_scores[k])
+        
+        # 추천 메시지 - 파란색 계열로 통일
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown(f"""
+            <div style="
+                background-color: #E3F2FD;
+                padding: 1.5rem;
+                border-radius: 8px;
+            ">
+                <h4 style="color: #1976D2; margin: 0 0 1rem 0; font-size: 1.1rem;">🔷 효율성 균형점</h4>
+                <div style="color: #1565C0; font-size: 0.95rem; line-height: 1.6;">
+                    <strong>Coherence:</strong> {coherence_elbow}개 토픽<br>
+                    <strong>Perplexity:</strong> {perplexity_elbow}개 토픽
+                </div>
+                <p style="color: #1976D2; font-size: 0.85rem; margin-top: 0.8rem; margin-bottom: 0;">
+                    💡 성능 대비 효율성이 가장 좋은 지점
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"""
+            <div style="
+                background-color: #E8F4F8;
+                padding: 1.5rem;
+                border-radius: 8px;
+            ">
+                <h4 style="color: #0D47A1; margin: 0 0 1rem 0; font-size: 1.1rem;">🔵 최고 성능</h4>
+                <div style="color: #1565C0; font-size: 0.95rem; line-height: 1.6;">
+                    <strong>Coherence:</strong> {best_coherence_topic}개 ({lda.coherence_scores[best_coherence_topic]:.4f})<br>
+                    <strong>Perplexity:</strong> {best_perplexity_topic}개 ({lda.perplexity_scores[best_perplexity_topic]:.2f})
+                </div>
+                <p style="color: #1976D2; font-size: 0.85rem; margin-top: 0.8rem; margin-bottom: 0;">
+                    💡 각 지표에서 최고 성능을 보이는 값
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div style="
+            background-color: #FAFAFA;
+            padding: 0.8rem 1.2rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+        ">
+            <p style="color: #546E7A; font-size: 0.9rem; margin: 0;">
+                📌 <strong>선택 가이드:</strong> 해석 용이성과 속도를 원하면 효율성 균형점(🔷밝은 파랑), 최고 정확도를 원하면 최고 성능(🔵진한 파랑) 선택
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
         
         fig_metrics = create_metrics_comparison_chart(lda.coherence_scores, lda.perplexity_scores)
         st.plotly_chart(fig_metrics, use_container_width=True)
@@ -784,25 +950,39 @@ def main():
         # 토픽 선택 UI
         col1, col2 = st.columns([3, 1])
         
+        # session_state 초기화 (버튼 앞에)
+        if 'selected_topics_list' not in st.session_state:
+            st.session_state['selected_topics_list'] = unique_topics[:min(3, len(unique_topics))]
+        
+        with col2:
+            if st.button("🔄 전체 선택", key="select_all", use_container_width=True):
+                st.session_state['selected_topics_list'] = unique_topics
+            
+            if st.button("❌ 전체 해제", key="clear_all", use_container_width=True):
+                st.session_state['selected_topics_list'] = []
+        
         with col1:
             selected_topics = st.multiselect(
                 "분석할 토픽 선택",
                 options=unique_topics,
-                default=unique_topics[:min(3, len(unique_topics))],  # 기본: 처음 3개
+                default=st.session_state['selected_topics_list'],
                 help="여러 개 선택 가능합니다. 선택한 토픽만 필터링하여 저장됩니다.",
                 format_func=lambda x: f"Topic {x}"
             )
         
-        with col2:
-            if st.button("🔄 전체 선택", key="select_all"):
-                selected_topics = unique_topics
-                st.rerun()
+        # multiselect 값 변경 시 즉시 session_state 업데이트
+        if selected_topics != st.session_state['selected_topics_list']:
+            st.session_state['selected_topics_list'] = selected_topics
         
         # 선택 결과 표시
         if selected_topics:
             filtered_df = result_df[result_df['lda_topic'].isin(selected_topics)].copy()
             
-            st.success(f"✅ {len(selected_topics)}개 토픽 선택됨 (총 {len(filtered_df):,}개 문서)")
+            st.markdown(f"""
+            <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                ✅ <strong>{len(selected_topics)}개 토픽 선택됨</strong> (총 {len(filtered_df):,}개 문서)
+            </div>
+            """, unsafe_allow_html=True)
             
             # 선택한 토픽 요약
             with st.expander("📊 선택한 토픽 요약"):
@@ -874,7 +1054,11 @@ def main():
             if st.button("💾 파일로 저장", use_container_width=True, key="save_csv"):
                 try:
                     filtered_df.to_csv(save_path, index=False, encoding='utf-8-sig')
-                    st.success(f"✅ 저장 완료!\n{save_path}")
+                    st.markdown(f"""
+                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                        ✅ <strong>저장 완료!</strong><br>{save_path}
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     # 파일 크기 표시
                     import os
@@ -908,7 +1092,11 @@ def main():
                         selected_info_df = topic_info_df[topic_info_df['Topic ID'].isin([f"Topic {x}" for x in selected_topics])]
                         selected_info_df.to_excel(writer, index=False, sheet_name='선택한토픽정보')
                     
-                    st.success(f"✅ 저장 완료!\n{save_path_excel}")
+                    st.markdown(f"""
+                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                        ✅ <strong>저장 완료!</strong><br>{save_path_excel}
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     import os
                     file_size = os.path.getsize(save_path_excel) / 1024
@@ -955,7 +1143,11 @@ def main():
                     with open(save_path_json, 'w', encoding='utf-8') as f:
                         json.dump(metadata, f, ensure_ascii=False, indent=2)
                     
-                    st.success(f"✅ 저장 완료!\n{save_path_json}")
+                    st.markdown(f"""
+                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                        ✅ <strong>저장 완료!</strong><br>{save_path_json}
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                 except Exception as e:
                     st.error(f"❌ 저장 실패: {str(e)}")

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-HBM 프로젝트 - H/V 라벨링 자동화 Streamlit 앱 (로컬 환경용)
+HBM 프로젝트 - 데이터 라벨링 자동화 Streamlit 앱 (로컬 환경용)
 """
 
 import streamlit as st
@@ -16,12 +16,11 @@ import os
 # ============================================================================
 # 페이지 설정
 # ============================================================================
-# st.set_page_config(
-#     page_title="H/V 라벨링 자동화",
-#     page_icon="🏷️",
-#     layout="wide",
-#     initial_sidebar_state="expanded"
-# )
+st.set_page_config(
+    page_title="데이터 라벨링",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ============================================================================
 # CSS 스타일
@@ -152,21 +151,53 @@ def create_distribution_chart(df):
     """라벨 분포 차트 생성"""
     label_counts = df['label'].value_counts()
     
+    # 파란 계열 그라데이션 (진한 파랑 → 연한 파랑)
+    colors = ['#1a5490', '#2874b5', '#4a90c5', '#73a9d6']
+    bar_colors = [colors[i % len(colors)] for i in range(len(label_counts))]
+    
     fig = go.Figure(data=[
         go.Bar(
             x=[LABEL_DESCRIPTIONS.get(label, label) for label in label_counts.index],
             y=label_counts.values,
             text=label_counts.values,
-            textposition='auto',
-            marker_color=['#ff7f0e', '#1f77b4']
+            textposition='outside',
+            textfont=dict(size=14, color='#2c3e50', family='Arial'),
+            marker=dict(
+                color=bar_colors,
+                line=dict(color='white', width=2)
+            ),
+            hovertemplate='<b>%{x}</b><br>문서 수: %{y:,}<extra></extra>'
         )
     ])
     
     fig.update_layout(
-        title='라벨 분포',
-        xaxis_title='라벨 타입',
-        yaxis_title='문서 수',
-        height=400
+        title=dict(
+            text='라벨 분포',
+            font=dict(size=18, color='#2c3e50', family='Arial'),
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis=dict(
+            title='',
+            tickfont=dict(size=13, color='#2c3e50'),
+            showgrid=False,
+            showline=False
+        ),
+        yaxis=dict(
+            title='문서 수',
+            title_font=dict(size=13, color='#7f8c8d'),
+            tickfont=dict(size=12, color='#7f8c8d'),
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#ecf0f1',
+            showline=False,
+            range=[0, label_counts.values.max() * 1.15]
+        ),
+        height=480,
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        margin=dict(t=100, b=60, l=80, r=40),
+        showlegend=False
     )
     
     return fig
@@ -178,21 +209,65 @@ def create_company_distribution(df):
     
     company_dist = pd.crosstab(df['company'], df['label'])
     
+    # 파란 계열 그라데이션
+    colors = ['#1a5490', '#2874b5', '#4a90c5', '#73a9d6']
+    
     fig = go.Figure(data=[
-        go.Bar(name=LABEL_DESCRIPTIONS.get(label, label),
-               x=company_dist.index,
-               y=company_dist[label],
-               text=company_dist[label],
-               textposition='auto')
-        for label in company_dist.columns
+        go.Bar(
+            name=LABEL_DESCRIPTIONS.get(label, label),
+            x=company_dist.index,
+            y=company_dist[label],
+            text=company_dist[label],
+            textposition='outside',
+            textfont=dict(size=13, color='#2c3e50'),
+            marker=dict(
+                color=colors[i % len(colors)],
+                line=dict(color='white', width=2)
+            ),
+            hovertemplate='<b>%{x}</b><br>%{fullData.name}: %{y:,}<extra></extra>'
+        )
+        for i, label in enumerate(company_dist.columns)
     ])
     
     fig.update_layout(
-        title='회사별 라벨 분포',
-        xaxis_title='회사',
-        yaxis_title='문서 수',
+        title=dict(
+            text='회사별 라벨 분포',
+            font=dict(size=18, color='#2c3e50', family='Arial'),
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis=dict(
+            title='',
+            tickfont=dict(size=12, color='#2c3e50'),
+            showgrid=False,
+            showline=False
+        ),
+        yaxis=dict(
+            title='문서 수',
+            title_font=dict(size=13, color='#7f8c8d'),
+            tickfont=dict(size=12, color='#7f8c8d'),
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#ecf0f1',
+            showline=False,
+            range=[0, company_dist.max().max() * 1.15]
+        ),
         barmode='group',
-        height=400
+        height=480,
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        margin=dict(t=100, b=100, l=80, r=40),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5,
+            bgcolor='white',
+            bordercolor='#ecf0f1',
+            borderwidth=1,
+            font=dict(size=12, color='#2c3e50')
+        )
     )
     
     return fig
@@ -201,15 +276,65 @@ def create_category_distribution(df):
     """카테고리별 분포 차트"""
     category_counts = df['aspect_category'].value_counts().head(10)
     
-    fig = px.bar(
-        x=category_counts.index,
-        y=category_counts.values,
-        labels={'x': '카테고리', 'y': '문서 수'},
-        title='Top 10 Aspect 카테고리',
-        text_auto=True
-    )
+    # 파란 계열 그라데이션 (진한 파랑 → 연한 파랑)
+    n = len(category_counts)
+    colors = []
+    for i in range(n):
+        # 진한 파랑(#1a5490)에서 연한 파랑(#b3d9ff)으로 그라데이션
+        ratio = i / max(n - 1, 1)
+        r = int(26 + (179 - 26) * ratio)
+        g = int(84 + (217 - 84) * ratio)
+        b = int(144 + (255 - 144) * ratio)
+        colors.append(f'rgb({r},{g},{b})')
     
-    fig.update_layout(height=400)
+    fig = go.Figure(data=[
+        go.Bar(
+            x=category_counts.index,
+            y=category_counts.values,
+            text=category_counts.values,
+            textposition='outside',
+            textfont=dict(size=12, color='#2c3e50'),
+            marker=dict(
+                color=colors,
+                line=dict(color='white', width=2)
+            ),
+            hovertemplate='<b>%{x}</b><br>문서 수: %{y:,}<extra></extra>'
+        )
+    ])
+    
+    fig.update_layout(
+        title=dict(
+            text='Top 10 키워드 카테고리',
+            font=dict(size=18, color='#2c3e50', family='Arial'),
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis=dict(
+            title='',
+            tickfont=dict(size=11, color='#2c3e50'),
+            tickangle=0,
+            tickmode='array',
+            tickvals=list(range(len(category_counts))),
+            ticktext=list(category_counts.index),
+            showgrid=False,
+            showline=False
+        ),
+        yaxis=dict(
+            title='문서 수',
+            title_font=dict(size=13, color='#7f8c8d'),
+            tickfont=dict(size=12, color='#7f8c8d'),
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#ecf0f1',
+            showline=False,
+            range=[0, category_counts.values.max() * 1.15]
+        ),
+        height=520,
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        margin=dict(t=100, b=120, l=80, r=40),
+        showlegend=False
+    )
     
     return fig
 
@@ -219,7 +344,7 @@ def create_category_distribution(df):
 
 def main():
     # 헤더
-    st.markdown('<div class="main-header">🏷️ H/V 라벨링 자동화</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">데이터 라벨링</div>', unsafe_allow_html=True)
     st.markdown("---")
     
     # ============================================================================
@@ -243,6 +368,34 @@ def main():
             key='json_uploader'
         )
     
+    # ============================================================================
+    # 파일 변경 감지 및 세션 상태 초기화 (추가된 부분)
+    # ============================================================================
+    current_csv_name = uploaded_csv.name if uploaded_csv else None
+    current_json_name = uploaded_term_db.name if uploaded_term_db else None
+
+    # 이전 파일명과 비교
+    if 'prev_csv_name' not in st.session_state:
+        st.session_state['prev_csv_name'] = None
+    if 'prev_json_name' not in st.session_state:
+        st.session_state['prev_json_name'] = None
+
+    # 파일이 바뀌면 결과 초기화
+    if (current_csv_name != st.session_state['prev_csv_name'] or
+        current_json_name != st.session_state['prev_json_name']):
+        
+        # 세션 상태 초기화
+        if 'df_labeled' in st.session_state:
+            del st.session_state['df_labeled']
+        if 'df_original_len' in st.session_state:
+            del st.session_state['df_original_len']
+        if 'config' in st.session_state:
+            del st.session_state['config']
+        
+        # 현재 파일명 저장
+        st.session_state['prev_csv_name'] = current_csv_name
+        st.session_state['prev_json_name'] = current_json_name
+    
     # JSON 편집기
     if uploaded_term_db is not None:
         with st.expander("📝 JSON 파일 수정 및 저장"):
@@ -258,7 +411,7 @@ def main():
             
             col_a, col_b = st.columns(2)
             with col_a:
-                if st.button("💾 수정된 JSON 저장", use_container_width=True):
+                if st.button("💾 수정된 JSON 저장", use_container_width=True, key="save_term_db"):
                     try:
                         # JSON 유효성 검사
                         json.loads(edited_json)
@@ -267,10 +420,16 @@ def main():
                             data=edited_json,
                             file_name=f"term_db_edited_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                             mime="application/json",
-                            use_container_width=True
+                            use_container_width=True,
+                            key="download_term_db"
                         )
                     except json.JSONDecodeError as e:
                         st.error(f"❌ JSON 형식 오류: {e}")
+            
+            with col_b:
+                if st.button("🔄 원본으로 되돌리기", use_container_width=True, key="reset_term_db"):
+                    st.session_state.json_editor = term_db_content
+                    st.rerun()
     
     if uploaded_csv is None or uploaded_term_db is None:
         st.info("⬆️ CSV 파일과 Term DB JSON 파일을 업로드해주세요.")
@@ -279,7 +438,12 @@ def main():
     # 데이터 로드
     try:
         df = pd.read_csv(uploaded_csv)
-        st.success(f"✅ 데이터 로드 완료: {len(df):,}개 문서")
+        # 깔끔한 회색 배경
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            ✅ <strong>데이터 로드 완료:</strong> {len(df):,}개 문서
+        </div>
+        """, unsafe_allow_html=True)
     except Exception as e:
         st.error(f"❌ CSV 파일 로드 실패: {e}")
         return
@@ -293,7 +457,12 @@ def main():
             uploaded_term_db.seek(0)
         
         TERM_DB = load_term_db_from_json(term_db_content)
-        st.success(f"✅ Term DB 로드 완료: {len(TERM_DB)}개 라벨")
+        # 깔끔한 회색 배경
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem;">
+            ✅ <strong>Term DB 로드 완료:</strong> {len(TERM_DB)}개 라벨
+        </div>
+        """, unsafe_allow_html=True)
     except Exception as e:
         st.error(f"❌ Term DB 파일 로드 실패: {e}")
         return
@@ -404,7 +573,12 @@ def main():
             st.session_state['df_original_len'] = df_original_len
             st.session_state['config'] = config
             
-            st.success("✅ 라벨링 완료!")
+            # 깔끔한 회색 배경
+            st.markdown("""
+            <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem;">
+                ✅ <strong>라벨링 완료!</strong>
+            </div>
+            """, unsafe_allow_html=True)
     
     # 결과 표시
     if 'df_labeled' in st.session_state:
@@ -445,6 +619,66 @@ def main():
                 fig2 = create_company_distribution(df_labeled)
                 if fig2:
                     st.plotly_chart(fig2, use_container_width=True)
+            else:
+                # company 컬럼이 없으면 match_count 분포 표시
+                match_dist = df_labeled['match_count'].value_counts().sort_index()
+                
+                # 파란 계열 그라데이션
+                n = len(match_dist)
+                colors = []
+                for i in range(n):
+                    ratio = i / max(n - 1, 1)
+                    r = int(26 + (115 - 26) * ratio)
+                    g = int(84 + (169 - 84) * ratio)
+                    b = int(144 + (214 - 144) * ratio)
+                    colors.append(f'rgb({r},{g},{b})')
+                
+                fig2 = go.Figure(data=[
+                    go.Bar(
+                        x=match_dist.index,
+                        y=match_dist.values,
+                        text=match_dist.values,
+                        textposition='outside',
+                        textfont=dict(size=13, color='#2c3e50'),
+                        marker=dict(
+                            color=colors,
+                            line=dict(color='white', width=2)
+                        ),
+                        hovertemplate='<b>매칭 수: %{x}</b><br>문서 수: %{y:,}<extra></extra>'
+                    )
+                ])
+                
+                fig2.update_layout(
+                    title=dict(
+                        text='매칭 키워드 수 분포',
+                        font=dict(size=18, color='#2c3e50', family='Arial'),
+                        x=0.5,
+                        xanchor='center'
+                    ),
+                    xaxis=dict(
+                        title='매칭 키워드 수',
+                        title_font=dict(size=13, color='#7f8c8d'),
+                        tickfont=dict(size=12, color='#2c3e50'),
+                        showgrid=False,
+                        showline=False
+                    ),
+                    yaxis=dict(
+                        title='문서 수',
+                        title_font=dict(size=13, color='#7f8c8d'),
+                        tickfont=dict(size=12, color='#7f8c8d'),
+                        showgrid=True,
+                        gridwidth=1,
+                        gridcolor='#ecf0f1',
+                        showline=False,
+                        range=[0, match_dist.values.max() * 1.15]
+                    ),
+                    height=480,
+                    plot_bgcolor='white',
+                    paper_bgcolor='white',
+                    margin=dict(t=100, b=60, l=80, r=40)
+                )
+                
+                st.plotly_chart(fig2, use_container_width=True)
         
         fig3 = create_category_distribution(df_labeled)
         st.plotly_chart(fig3, use_container_width=True)
@@ -485,17 +719,24 @@ def main():
             )
         
         with col3:
+            # Excel 파일 생성
             buffer = BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_labeled.to_excel(writer, index=False, sheet_name='라벨링결과')
-            
-            st.download_button(
-                label="📥 Excel 다운로드",
-                data=buffer.getvalue(),
-                file_name=f"hv_labeled_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+            try:
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_labeled.to_excel(writer, index=False, sheet_name='라벨링결과')
+                
+                excel_data = buffer.getvalue()
+                
+                st.download_button(
+                    label="📥 Excel 다운로드",
+                    data=excel_data,
+                    file_name=f"hv_labeled_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            except ImportError:
+                st.warning("⚠️ openpyxl이 설치되지 않아 Excel 다운로드를 사용할 수 없습니다.")
+                st.info("대신 CSV 다운로드를 사용해주세요.")
 
 if __name__ == "__main__":
     main()

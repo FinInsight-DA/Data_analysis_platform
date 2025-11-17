@@ -31,12 +31,12 @@ def run_page(pyfile: Path, func_name: str = "main") -> None:
 # 페이지 라우팅 테이블 (좌측 사이드바 메뉴 ↔ 실제 파일 경로 매핑) 각 파일에는 반드시 `main()` 함수가 있어야 함
 # ===========================================================================
 PAGES = {
-    "① 크롤링": ROOT / "1.crawling" / "app_crawling.py",
-    "② H/V 라벨링": ROOT / "2.data_preparation" / "hv_labeling_app.py",
-    "③ LDA": ROOT / "3-1.lda" / "lda_app.py",
-    "④ BERTopic": ROOT / "3-2.bertopic" / "bertopic_app.py",
-    "⑤ 감성 분석": ROOT / "4.sentiment" / "sentiment_app.py",  # ← 여기만 변경
-    "⑥ OLS 회귀": ROOT / "5.ols" / "streamlit_app.py",
+    " 크롤링": ROOT / "1.crawling" / "app_crawling.py",
+    " H/V 라벨링": ROOT / "2.data_preparation" / "hv_labeling_app.py",
+    " LDA": ROOT / "3-1.lda" / "lda_app.py",
+    " BERTopic": ROOT / "3-2.bertopic" / "bertopic_app.py",
+    " 감성 분석": ROOT / "4.sentiment" / "sentiment_app.py",  # ← 여기만 변경
+    " OLS 회귀": ROOT / "5.ols" / "streamlit_app.py",
 }
 
 
@@ -100,11 +100,11 @@ with st.sidebar:
 target = PAGES[choice]
 
 # 공통 안내(최초 진입시만)
-with st.sidebar.expander("ℹ️ 사용 팁", expanded=False):
+with st.sidebar.expander("ℹ️ 사용 가이드", expanded=False):
     st.write(
-        "- 각 하위 앱 파일은 **`main()` 함수**를 반드시 노출하세요.\n"
+
         "- 환경 패키지는 폴더별 `requirements*.txt` 참고.\n"
-        "- 오류가 뜨면 해당 파일 하단에 `if __name__ == '__main__': main()` 형태로도 실행 점검해보세요."
+
     )
 
 # 페이지 실행
