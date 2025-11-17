@@ -1029,130 +1029,111 @@ def main():
         
         st.markdown("---")
         
-        # ============================================================================
+                # =====================================================================
         # 5. 다운로드
-        # ============================================================================
+        # =====================================================================
         st.markdown('<div class="sub-header">💾 4. 결과 다운로드</div>', unsafe_allow_html=True)
-        
+
         st.info(f"💡 **선택한 토픽 ({len(selected_topics)}개)의 데이터만 저장됩니다** ({len(filtered_df):,}개 문서)")
-        
+
         col1, col2, col3 = st.columns(3)
-        
-        # CSV 다운로드
+
+        # -----------------------------
+        # 5-1. CSV 다운로드
+        # -----------------------------
         with col1:
-            st.write("**💾 CSV 저장**")
-            
-            # 저장 경로 입력
-            default_path = str(Path.home() / "Desktop" / f"lda_{selected_n_topics}_topics_selected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-            
-            save_path = st.text_input(
-                "저장 경로",
-                value=default_path,
-                help="파일을 저장할 경로를 입력하세요"
+            st.write("**📥 CSV 다운로드**")
+
+            csv_utf8sig = filtered_df.to_csv(index=False, encoding="utf-8-sig")
+            file_name_csv = f"lda_{selected_n_topics}_topics_selected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+            st.download_button(
+                label="CSV 다운로드 (UTF-8-SIG, Excel용)",
+                data=csv_utf8sig,
+                file_name=file_name_csv,
+                mime="text/csv",
+                use_container_width=True,
+                key="lda_download_csv",
             )
-            
-            if st.button("💾 파일로 저장", use_container_width=True, key="save_csv"):
-                try:
-                    filtered_df.to_csv(save_path, index=False, encoding='utf-8-sig')
-                    st.markdown(f"""
-                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
-                        ✅ <strong>저장 완료!</strong><br>{save_path}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # 파일 크기 표시
-                    import os
-                    file_size = os.path.getsize(save_path) / 1024
-                    st.info(f"📊 파일 크기: {file_size:.2f} KB")
-                    
-                except Exception as e:
-                    st.error(f"❌ 저장 실패: {str(e)}")
-            
-            st.caption(f"💡 선택한 토픽: {len(selected_topics)}개\n문서: {len(filtered_df):,}개")
-        
-        # Excel 다운로드
+
+            st.caption(f"💡 선택한 토픽: {len(selected_topics)}개 / 문서: {len(filtered_df):,}개")
+
+        # -----------------------------
+        # 5-2. Excel 다운로드
+        # -----------------------------
         with col2:
-            st.write("**💾 Excel 저장**")
-            
-            default_path_excel = str(Path.home() / "Desktop" / f"lda_{selected_n_topics}_topics_selected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
-            
-            save_path_excel = st.text_input(
-                "저장 경로 (Excel)",
-                value=default_path_excel,
-                help="Excel 파일을 저장할 경로를 입력하세요"
-            )
-            
-            if st.button("💾 Excel로 저장", use_container_width=True, key="save_excel"):
-                try:
-                    with pd.ExcelWriter(save_path_excel, engine='openpyxl') as writer:
-                        filtered_df.to_excel(writer, index=False, sheet_name='선택한토픽')
-                        keywords_df.to_excel(writer, index=False, sheet_name='전체토픽키워드')
-                        
-                        # 선택한 토픽 정보 시트 추가
-                        selected_info_df = topic_info_df[topic_info_df['Topic ID'].isin([f"Topic {x}" for x in selected_topics])]
-                        selected_info_df.to_excel(writer, index=False, sheet_name='선택한토픽정보')
-                    
-                    st.markdown(f"""
-                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
-                        ✅ <strong>저장 완료!</strong><br>{save_path_excel}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    import os
-                    file_size = os.path.getsize(save_path_excel) / 1024
-                    st.info(f"📊 파일 크기: {file_size:.2f} KB")
-                    
-                except Exception as e:
-                    st.error(f"❌ 저장 실패: {str(e)}")
-            
-            st.caption("💡 3개 시트 포함\n(선택한토픽, 전체토픽키워드, 선택한토픽정보)")
-        
-        # 메타데이터 다운로드
+            st.write("**📥 Excel 다운로드**")
+
+            buffer = BytesIO()
+            try:
+                with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                    # 시트 1: 선택한 토픽의 문서
+                    filtered_df.to_excel(writer, index=False, sheet_name="선택한토픽")
+                    # 시트 2: 전체 토픽 키워드
+                    keywords_df.to_excel(writer, index=False, sheet_name="전체토픽키워드")
+                    # 시트 3: 선택한 토픽 정보만
+                    selected_info_df = topic_info_df[
+                        topic_info_df["Topic ID"].isin([f"Topic {x}" for x in selected_topics])
+                    ]
+                    selected_info_df.to_excel(writer, index=False, sheet_name="선택한토픽정보")
+
+                excel_data = buffer.getvalue()
+                file_name_xlsx = f"lda_{selected_n_topics}_topics_selected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+                st.download_button(
+                    label="Excel 다운로드",
+                    data=excel_data,
+                    file_name=file_name_xlsx,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="lda_download_excel",
+                )
+
+            except ImportError:
+                st.warning("⚠️ openpyxl이 설치되지 않아 Excel 다운로드를 사용할 수 없습니다.")
+                st.info("`pip install openpyxl` 후 다시 시도해주세요.")
+
+            st.caption("💡 3개 시트 포함 (선택한토픽, 전체토픽키워드, 선택한토픽정보)")
+
+        # -----------------------------
+        # 5-3. 메타데이터(JSON) 다운로드
+        # -----------------------------
         with col3:
-            st.write("**💾 메타데이터 저장**")
-            
-            default_path_json = str(Path.home() / "Desktop" / f"lda_{selected_n_topics}_metadata_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-            
-            save_path_json = st.text_input(
-                "저장 경로 (JSON)",
-                value=default_path_json,
-                help="메타데이터 JSON 파일을 저장할 경로를 입력하세요"
+            st.write("**📥 메타데이터(JSON) 다운로드**")
+
+            metadata = {
+                "n_topics": selected_n_topics,
+                "total_documents": len(result_df),
+                "selected_topics": selected_topics,
+                "filtered_documents": len(filtered_df),
+                "coherence_score": float(lda.coherence_scores[selected_n_topics]),
+                "perplexity_score": float(lda.perplexity_scores[selected_n_topics]),
+                "parameters": {
+                    "passes": passes,
+                    "iterations": iterations,
+                    "alpha": str(alpha),  # auto / symmetric 등 문자열일 수 있어서 str
+                    "eta": str(eta),
+                    "no_below": no_below,
+                    "no_above": no_above,
+                    "keep_n": keep_n,
+                },
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            json_str = json.dumps(metadata, ensure_ascii=False, indent=2)
+            file_name_json = f"lda_{selected_n_topics}_metadata_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+            st.download_button(
+                label="메타데이터 JSON 다운로드",
+                data=json_str.encode("utf-8"),
+                file_name=file_name_json,
+                mime="application/json",
+                use_container_width=True,
+                key="lda_download_json",
             )
-            
-            if st.button("💾 JSON으로 저장", use_container_width=True, key="save_json"):
-                try:
-                    metadata = {
-                        'n_topics': selected_n_topics,
-                        'total_documents': len(result_df),
-                        'selected_topics': selected_topics,
-                        'filtered_documents': len(filtered_df),
-                        'coherence_score': lda.coherence_scores[selected_n_topics],
-                        'perplexity_score': lda.perplexity_scores[selected_n_topics],
-                        'parameters': {
-                            'passes': passes,
-                            'iterations': iterations,
-                            'alpha': str(alpha),  # auto일 수도 있어서 str로 변환
-                            'eta': str(eta),
-                            'no_below': no_below,
-                            'no_above': no_above,
-                            'keep_n': keep_n
-                        },
-                        'timestamp': datetime.now().isoformat()
-                    }
-                    
-                    with open(save_path_json, 'w', encoding='utf-8') as f:
-                        json.dump(metadata, f, ensure_ascii=False, indent=2)
-                    
-                    st.markdown(f"""
-                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
-                        ✅ <strong>저장 완료!</strong><br>{save_path_json}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                except Exception as e:
-                    st.error(f"❌ 저장 실패: {str(e)}")
-            
-            st.caption("💡 학습 파라미터 포함")
+
+            st.caption("💡 학습 파라미터 및 선택 토픽 정보 포함")
+
 
 if __name__ == "__main__":
     main()
