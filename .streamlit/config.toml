@@ -1,0 +1,15 @@
+[server]
+maxUploadSize = 1000
+maxMessageSize = 1000
+connectionTimeout = 1800
+
+[runner]
+fastReruns = true
+magicEnabled = true
+
+[theme]
+primaryColor = "#1f77b4"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+font = "sans serif"
