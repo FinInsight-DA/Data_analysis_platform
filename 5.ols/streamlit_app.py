@@ -4,6 +4,10 @@ import sys
 from pathlib import Path
 import plotly.graph_objects as go
 import plotly.express as px
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from io import BytesIO
+import numpy as np
 
 # 같은 디렉토리의 모듈을 임포트하기 위해 경로 추가
 _current_dir = Path(__file__).resolve().parent
@@ -346,6 +350,11 @@ def main():
             else:
                 st.error("분석할 회사를 선택해 주세요.")
 
+            # ==============================
+            # 6-1. 여러 회사 주가 비교 시각화 (2개 이상 선택 시)
+            # ==============================
+            all_market_data = {}  # 회사별 시장 데이터 저장
+            
             # --- 각 회사별 실행 ---
             for label, selector in targets:
                 try:
@@ -375,6 +384,9 @@ def main():
                             end=end_str,
                             save_path=None,
                         )
+                        
+                        # 주가 비교를 위해 저장
+                        all_market_data[label] = market_df.copy()
 
                     # 회귀 시나리오 실행
                     scenario_results = run_regression_scenarios_from_frames(
@@ -397,9 +409,13 @@ def main():
                     continue
 
                 # ==============================
-                # 7. 결과 표시
+                # 7. 결과 표시 (텍스트/테이블 먼저)
                 # ==============================
                 st.markdown(f"## {label}")
+
+                # 시각화를 저장할 리스트
+                visualization_figures = []
+                visualization_titles = []
 
                 # scenario_name, result 구조
                 for scenario_name, result in scenario_results:
@@ -422,7 +438,6 @@ def main():
                         )
 
                 # 마지막 시나리오의 result를 사용 (진단/계수 표시는 공통 구조라고 가정)
-                # 필요하면 위 for 루프 안으로 이동해서 시나리오별로 각각 보여줄 수도 있음
                 if result.diagnostics is not None:
                     st.markdown("#### 회귀 요약 지표")
                     st.dataframe(
@@ -452,13 +467,71 @@ def main():
                             mime="text/csv",
                         )
 
-                        # -------------------------
-                        # 계수 기반 시각화 (감성 변수만)
-                        # -------------------------
+                        # 감성 변수 영향 요약 테이블
                         sentiment_columns_set = set(
                             candidate_features + lag_generated_feature_names
                         )
+                        sentiment_effects = result.coefficients[
+                            result.coefficients["variable"].isin(
+                                sentiment_columns_set
+                            )
+                        ].copy()
 
+                        if not sentiment_effects.empty:
+                            sentiment_effects["영향 방향"] = sentiment_effects[
+                                "coef"
+                            ].apply(
+                                lambda v: "양(+) 영향" if v > 0 else "음(-) 영향"
+                            )
+
+                            def _significance_label(p: float) -> str:
+                                if p < 0.01:
+                                    return "*** (p < 0.01)"
+                                if p < 0.05:
+                                    return "** (p < 0.05)"
+                                if p < 0.1:
+                                    return "* (p < 0.10)"
+                                return "ns"
+
+                            sentiment_effects["유의성"] = sentiment_effects[
+                                "p_value"
+                            ].apply(_significance_label)
+                            sentiment_effects = sentiment_effects.sort_values(
+                                "p_value"
+                            )
+
+                            display_cols = sentiment_effects[
+                                [
+                                    "variable",
+                                    "coef",
+                                    "p_value",
+                                    "영향 방향",
+                                    "유의성",
+                                    "ci_lower",
+                                    "ci_upper",
+                                ]
+                            ].rename(
+                                columns={
+                                    "variable": "컬럼",
+                                    "coef": "계수",
+                                    "p_value": "p-value",
+                                    "ci_lower": "신뢰구간 하한",
+                                    "ci_upper": "신뢰구간 상한",
+                                }
+                            )
+
+                            st.markdown("#### 감성 지수가 종속변수에 미치는 영향 요약")
+                            st.dataframe(
+                                display_cols.round(6), use_container_width=True
+                            )
+                            st.caption(
+                                "양(+) 영향은 종속변수를 증가시키는 방향, 음(-) 영향은 감소시키는 방향을 의미합니다. "
+                                "유의성 표기는 통계적 유의수준을 의미합니다."
+                            )
+
+                        # -------------------------
+                        # 계수 기반 시각화 (감성 변수만) - 나중에 표시하기 위해 저장
+                        # -------------------------
                         coef_df = result.coefficients.copy()
                         sentiment_coefs = coef_df[
                             (coef_df["variable"] != "const")
@@ -542,7 +615,8 @@ def main():
                                     zerolinecolor="gray",
                                 ),
                             )
-                            st.plotly_chart(fig_coef, use_container_width=True)
+                            visualization_figures.append(fig_coef)
+                            visualization_titles.append(f"{scenario_name} - 회귀 계수")
 
                             # p-value 기반 영향도 히트맵(산점도)
                             if len(sentiment_coefs) > 1:
@@ -585,71 +659,11 @@ def main():
                                         zerolinecolor="gray",
                                     ),
                                 )
-                                st.plotly_chart(
-                                    fig_heatmap, use_container_width=True
-                                )
-
-                        # 감성 변수 영향 요약 테이블
-                        sentiment_effects = result.coefficients[
-                            result.coefficients["variable"].isin(
-                                sentiment_columns_set
-                            )
-                        ].copy()
-
-                        if not sentiment_effects.empty:
-                            sentiment_effects["영향 방향"] = sentiment_effects[
-                                "coef"
-                            ].apply(
-                                lambda v: "양(+) 영향" if v > 0 else "음(-) 영향"
-                            )
-
-                            def _significance_label(p: float) -> str:
-                                if p < 0.01:
-                                    return "*** (p < 0.01)"
-                                if p < 0.05:
-                                    return "** (p < 0.05)"
-                                if p < 0.1:
-                                    return "* (p < 0.10)"
-                                return "ns"
-
-                            sentiment_effects["유의성"] = sentiment_effects[
-                                "p_value"
-                            ].apply(_significance_label)
-                            sentiment_effects = sentiment_effects.sort_values(
-                                "p_value"
-                            )
-
-                            display_cols = sentiment_effects[
-                                [
-                                    "variable",
-                                    "coef",
-                                    "p_value",
-                                    "영향 방향",
-                                    "유의성",
-                                    "ci_lower",
-                                    "ci_upper",
-                                ]
-                            ].rename(
-                                columns={
-                                    "variable": "컬럼",
-                                    "coef": "계수",
-                                    "p_value": "p-value",
-                                    "ci_lower": "신뢰구간 하한",
-                                    "ci_upper": "신뢰구간 상한",
-                                }
-                            )
-
-                            st.markdown("#### 감성 지수가 종속변수에 미치는 영향 요약")
-                            st.dataframe(
-                                display_cols.round(6), use_container_width=True
-                            )
-                            st.caption(
-                                "양(+) 영향은 종속변수를 증가시키는 방향, 음(-) 영향은 감소시키는 방향을 의미합니다. "
-                                "유의성 표기는 통계적 유의수준을 의미합니다."
-                            )
+                                visualization_figures.append(fig_heatmap)
+                                visualization_titles.append(f"{scenario_name} - 감성 변수 영향도")
 
                 # ==============================
-                # 8. 시장 데이터 시각화/다운로드
+                # 8. 시장 데이터 시각화 준비 (나중에 표시하기 위해 저장)
                 # ==============================
                 if not market_df.empty and "date" in market_df.columns:
                     market_df_viz = market_df.copy()
@@ -658,111 +672,267 @@ def main():
                     )
                     market_df_viz = market_df_viz.sort_values("date")
 
-                    with st.expander(
-                        f"{label} 시장 데이터 시각화", expanded=False
-                    ):
-                        # 주가 시계열
-                        if "Close" in market_df_viz.columns or "종가" in market_df_viz.columns:
-                            price_col = (
-                                "Close"
-                                if "Close" in market_df_viz.columns
-                                else "종가"
+                    # 주가 시계열
+                    if "Close" in market_df_viz.columns or "종가" in market_df_viz.columns:
+                        price_col = (
+                            "Close"
+                            if "Close" in market_df_viz.columns
+                            else "종가"
+                        )
+                        fig_price = go.Figure()
+                        fig_price.add_trace(
+                            go.Scatter(
+                                x=market_df_viz["date"],
+                                y=market_df_viz[price_col],
+                                mode="lines",
+                                name="종가",
+                                line=dict(color="steelblue", width=2),
+                                hovertemplate="날짜: %{x}<br>종가: %{y:,.0f}원<extra></extra>",
                             )
-                            fig_price = go.Figure()
-                            fig_price.add_trace(
-                                go.Scatter(
-                                    x=market_df_viz["date"],
-                                    y=market_df_viz[price_col],
-                                    mode="lines",
-                                    name="종가",
-                                    line=dict(color="steelblue", width=2),
-                                    hovertemplate="날짜: %{x}<br>종가: %{y:,.0f}원<extra></extra>",
-                                )
-                            )
-                            fig_price.update_layout(
-                                title=f"{label} 주가 시계열",
-                                xaxis_title="날짜",
-                                yaxis_title="종가 (원)",
-                                hovermode="x unified",
-                                height=400,
-                            )
-                            st.plotly_chart(
-                                fig_price, use_container_width=True
-                            )
+                        )
+                        fig_price.update_layout(
+                            title=f"{label} 주가 시계열",
+                            xaxis_title="날짜",
+                            yaxis_title="종가 (원)",
+                            hovermode="x unified",
+                            height=400,
+                        )
+                        visualization_figures.append(fig_price)
+                        visualization_titles.append(f"{label} 주가 시계열")
 
-                        # 일일 수익률
-                        if "daily_return" in market_df_viz.columns:
-                            fig_return = go.Figure()
-                            colors = [
-                                "red"
-                                if x < 0
-                                else "green"
-                                for x in market_df_viz["daily_return"]
-                            ]
-                            fig_return.add_trace(
-                                go.Bar(
-                                    x=market_df_viz["date"],
-                                    y=market_df_viz["daily_return"],
-                                    name="일일 수익률",
-                                    marker_color=colors,
-                                    hovertemplate="날짜: %{x}<br>수익률: %{y:.4f}<extra></extra>",
-                                )
+                    # 일일 수익률
+                    if "daily_return" in market_df_viz.columns:
+                        fig_return = go.Figure()
+                        colors = [
+                            "red"
+                            if x < 0
+                            else "green"
+                            for x in market_df_viz["daily_return"]
+                        ]
+                        fig_return.add_trace(
+                            go.Bar(
+                                x=market_df_viz["date"],
+                                y=market_df_viz["daily_return"],
+                                name="일일 수익률",
+                                marker_color=colors,
+                                hovertemplate="날짜: %{x}<br>수익률: %{y:.4f}<extra></extra>",
                             )
-                            fig_return.update_layout(
-                                title=f"{label} 일일 수익률",
-                                xaxis_title="날짜",
-                                yaxis_title="일일 수익률",
-                                hovermode="x unified",
-                                height=400,
-                                yaxis=dict(
-                                    zeroline=True,
-                                    zerolinewidth=2,
-                                    zerolinecolor="gray",
-                                ),
-                            )
-                            st.plotly_chart(
-                                fig_return, use_container_width=True
-                            )
+                        )
+                        fig_return.update_layout(
+                            title=f"{label} 일일 수익률",
+                            xaxis_title="날짜",
+                            yaxis_title="일일 수익률",
+                            hovermode="x unified",
+                            height=400,
+                            yaxis=dict(
+                                zeroline=True,
+                                zerolinewidth=2,
+                                zerolinecolor="gray",
+                            ),
+                        )
+                        visualization_figures.append(fig_return)
+                        visualization_titles.append(f"{label} 일일 수익률")
 
-                        # 환율 시계열
-                        if "USDKRW" in market_df_viz.columns:
-                            fig_fx = go.Figure()
-                            fig_fx.add_trace(
-                                go.Scatter(
-                                    x=market_df_viz["date"],
-                                    y=market_df_viz["USDKRW"],
-                                    mode="lines",
-                                    name="USD/KRW",
-                                    line=dict(color="orange", width=2),
-                                    hovertemplate="날짜: %{x}<br>환율: %{y:,.2f}원<extra></extra>",
-                                )
+                    # 환율 시계열
+                    if "USDKRW" in market_df_viz.columns:
+                        fig_fx = go.Figure()
+                        fig_fx.add_trace(
+                            go.Scatter(
+                                x=market_df_viz["date"],
+                                y=market_df_viz["USDKRW"],
+                                mode="lines",
+                                name="USD/KRW",
+                                line=dict(color="orange", width=2),
+                                hovertemplate="날짜: %{x}<br>환율: %{y:,.2f}원<extra></extra>",
                             )
-                            fig_fx.update_layout(
-                                title=f"{label} USD/KRW 환율",
-                                xaxis_title="날짜",
-                                yaxis_title="환율 (원)",
-                                hovermode="x unified",
-                                height=400,
-                            )
-                            st.plotly_chart(fig_fx, use_container_width=True)
+                        )
+                        fig_fx.update_layout(
+                            title=f"{label} USD/KRW 환율",
+                            xaxis_title="날짜",
+                            yaxis_title="환율 (원)",
+                            hovermode="x unified",
+                            height=400,
+                        )
+                        visualization_figures.append(fig_fx)
+                        visualization_titles.append(f"{label} USD/KRW 환율")
 
+                    # 시장 데이터 미리보기
                     with st.expander(f"{label} 시장 데이터 미리보기"):
                         st.dataframe(
                             market_df.tail().sort_values("date"),
                             use_container_width=True,
                         )
 
-                st.download_button(
-                    label=f"{label} 시세·환율 CSV 다운로드",
-                    data=market_df.to_csv(
-                        index=False, encoding="utf-8-sig"
-                    ),
-                    file_name=f"market_{label}.csv",
-                    mime="text/csv",
+                    st.download_button(
+                        label=f"{label} 시세·환율 CSV 다운로드",
+                        data=market_df.to_csv(
+                            index=False, encoding="utf-8-sig"
+                        ),
+                        file_name=f"market_{label}.csv",
+                        mime="text/csv",
+                    )
+
+                # ==============================
+                # 9. 모든 시각화를 아래쪽에 모아서 표시
+                # ==============================
+                if visualization_figures:
+                    st.markdown("---")
+                    st.markdown(f"## {label} 시각화")
+                    
+                    for fig, title in zip(visualization_figures, visualization_titles):
+                        st.markdown(f"### {title}")
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.markdown("---")
+            
+            # ==============================
+            # 10. 추가 시각화 (전체 회사 비교)
+            # ==============================
+            if len(all_market_data) >= 2:
+                st.markdown("---")
+                st.markdown("## 회사별 주가 비교")
+                
+                # 주가 비교 차트
+                fig_comparison = go.Figure()
+                colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray']
+                
+                for idx, (company_label, market_data) in enumerate(all_market_data.items()):
+                    if not market_data.empty and "date" in market_data.columns:
+                        market_data_viz = market_data.copy()
+                        market_data_viz["date"] = pd.to_datetime(market_data_viz["date"])
+                        market_data_viz = market_data_viz.sort_values("date")
+                        
+                        # 종가 컬럼 찾기
+                        price_col = None
+                        if "Close" in market_data_viz.columns:
+                            price_col = "Close"
+                        elif "종가" in market_data_viz.columns:
+                            price_col = "종가"
+                        
+                        if price_col:
+                            fig_comparison.add_trace(
+                                go.Scatter(
+                                    x=market_data_viz["date"],
+                                    y=market_data_viz[price_col],
+                                    mode="lines",
+                                    name=company_label,
+                                    line=dict(color=colors[idx % len(colors)], width=2),
+                                    hovertemplate=f"<b>{company_label}</b><br>날짜: %{{x}}<br>종가: %{{y:,.0f}}원<extra></extra>",
+                                )
+                            )
+                
+                fig_comparison.update_layout(
+                    title="회사별 주가 비교",
+                    xaxis_title="날짜",
+                    yaxis_title="종가 (원)",
+                    hovermode="x unified",
+                    height=500,
+                    legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
                 )
+                st.plotly_chart(fig_comparison, use_container_width=True)
+            
+            # ==============================
+            # 11. 워드 클라우드 시각화
+            # ==============================
+            if sentiment_df is not None:
+                st.markdown("---")
+                st.markdown("## 워드 클라우드 시각화")
+                
+                # 키워드 데이터 추출 시도
+                keyword_col = None
+                if "extracted_keywords" in sentiment_df.columns:
+                    keyword_col = "extracted_keywords"
+                elif "aspect_term" in sentiment_df.columns:
+                    keyword_col = "aspect_term"
+                
+                if keyword_col:
+                    # 감성별 키워드 추출
+                    sentiment_col = "sentiment" if "sentiment" in sentiment_df.columns else "predicted_sentiment"
+                    
+                    if sentiment_col in sentiment_df.columns:
+                        # 긍정 키워드
+                        positive_df = sentiment_df[
+                            sentiment_df[sentiment_col].astype(str).str.lower().isin(["positive", "pos", "1", "1.0"])
+                        ]
+                        # 부정 키워드
+                        negative_df = sentiment_df[
+                            sentiment_df[sentiment_col].astype(str).str.lower().isin(["negative", "neg", "-1", "-1.0"])
+                        ]
+                        
+                        def extract_keywords_freq(df, col_name):
+                            """키워드 빈도 추출"""
+                            all_keywords = []
+                            for keywords_str in df[col_name].dropna():
+                                if isinstance(keywords_str, str):
+                                    # 리스트 형태 문자열 파싱
+                                    try:
+                                        import ast
+                                        keywords = ast.literal_eval(keywords_str)
+                                        if isinstance(keywords, list):
+                                            all_keywords.extend(keywords)
+                                    except:
+                                        # 쉼표로 구분된 문자열
+                                        keywords = [k.strip() for k in keywords_str.replace("[", "").replace("]", "").replace("'", "").split(",")]
+                                        all_keywords.extend([k for k in keywords if k])
+                            
+                            # 빈도 계산
+                            from collections import Counter
+                            return dict(Counter(all_keywords))
+                        
+                        positive_freq = extract_keywords_freq(positive_df, keyword_col)
+                        negative_freq = extract_keywords_freq(negative_df, keyword_col)
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if positive_freq:
+                                st.markdown("### 긍정 키워드 워드 클라우드")
+                                try:
+                                    wordcloud_pos = WordCloud(
+                                        width=800, height=400,
+                                        background_color='white',
+                                        colormap='Greens',
+                                        max_words=100
+                                    ).generate_from_frequencies(positive_freq)
+                                    
+                                    fig_wc_pos, ax_pos = plt.subplots(figsize=(10, 5))
+                                    ax_pos.imshow(wordcloud_pos, interpolation='bilinear')
+                                    ax_pos.axis("off")
+                                    ax_pos.set_title("Positive Keywords", fontsize=16, pad=20)
+                                    st.pyplot(fig_wc_pos)
+                                    plt.close(fig_wc_pos)
+                                except Exception as e:
+                                    st.warning(f"긍정 워드 클라우드 생성 실패: {e}")
+                            else:
+                                st.info("긍정 키워드 데이터가 없습니다.")
+                        
+                        with col2:
+                            if negative_freq:
+                                st.markdown("### 부정 키워드 워드 클라우드")
+                                try:
+                                    wordcloud_neg = WordCloud(
+                                        width=800, height=400,
+                                        background_color='white',
+                                        colormap='Reds',
+                                        max_words=100
+                                    ).generate_from_frequencies(negative_freq)
+                                    
+                                    fig_wc_neg, ax_neg = plt.subplots(figsize=(10, 5))
+                                    ax_neg.imshow(wordcloud_neg, interpolation='bilinear')
+                                    ax_neg.axis("off")
+                                    ax_neg.set_title("Negative Keywords", fontsize=16, pad=20)
+                                    st.pyplot(fig_wc_neg)
+                                    plt.close(fig_wc_neg)
+                                except Exception as e:
+                                    st.warning(f"부정 워드 클라우드 생성 실패: {e}")
+                            else:
+                                st.info("부정 키워드 데이터가 없습니다.")
+                    else:
+                        st.info("감성 컬럼을 찾을 수 없어 워드 클라우드를 생성할 수 없습니다.")
+                else:
+                    st.info("키워드 컬럼(`extracted_keywords` 또는 `aspect_term`)이 없어 워드 클라우드를 생성할 수 없습니다.")
 
     # ==============================
-    # 9. 종목 코드 확인 버튼 로직
+    # 12. 종목 코드 확인 버튼 로직
     # ==============================
     if lookup_pressed:
         if sentiment_df is None:
