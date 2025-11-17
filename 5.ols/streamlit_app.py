@@ -423,6 +423,7 @@ def main():
             # 6-1. 여러 회사 주가 비교 시각화 (2개 이상 선택 시)
             # ==============================
             all_market_data = {}  # 회사별 시장 데이터 저장
+            all_scenario_results = {}  # 회사별 시나리오 결과 저장
             
             # --- 각 회사별 실행 ---
             for label, selector in targets:
@@ -473,6 +474,9 @@ def main():
                         lag_periods=lag_periods_effective,
                         lag_target_columns=lag_target_columns_effective,
                     )
+                    
+                    # 회사별 시나리오 결과 저장
+                    all_scenario_results[label] = scenario_results
                 except Exception as exc:
                     st.error(f"{label} 처리 중 오류가 발생했습니다: {exc}")
                     continue
@@ -741,34 +745,6 @@ def main():
                     )
                     market_df_viz = market_df_viz.sort_values("date")
 
-                    # 주가 시계열
-                    if "Close" in market_df_viz.columns or "종가" in market_df_viz.columns:
-                        price_col = (
-                            "Close"
-                            if "Close" in market_df_viz.columns
-                            else "종가"
-                        )
-                        fig_price = go.Figure()
-                        fig_price.add_trace(
-                            go.Scatter(
-                                x=market_df_viz["date"],
-                                y=market_df_viz[price_col],
-                                mode="lines",
-                                name="종가",
-                                line=dict(color="steelblue", width=2),
-                                hovertemplate="날짜: %{x}<br>종가: %{y:,.0f}원<extra></extra>",
-                            )
-                        )
-                        fig_price.update_layout(
-                            title=f"{label} 주가 시계열",
-                            xaxis_title="날짜",
-                            yaxis_title="종가 (원)",
-                            hovermode="x unified",
-                            height=400,
-                        )
-                        visualization_figures.append(fig_price)
-                        visualization_titles.append(f"{label} 주가 시계열")
-
                     # 일일 수익률
                     if "daily_return" in market_df_viz.columns:
                         fig_return = go.Figure()
@@ -1015,10 +991,333 @@ def main():
                             st.info("감성 컬럼을 찾을 수 없어 워드 클라우드를 생성할 수 없습니다.")
                     else:
                         st.info("키워드 컬럼(`extracted_keywords` 또는 `aspect_term`)이 없어 워드 클라우드를 생성할 수 없습니다.")
+            
+            # ==============================
+            # 12. 추가 시각화 (회사별 상세 분석)
+            # ==============================
+            if len(targets) > 0 and all_scenario_results:
+                st.markdown("---")
+                st.markdown("## 추가 시각화 분석")
+                
+                # 각 회사별로 추가 시각화 생성
+                for label, selector in targets:
+                    if label not in all_scenario_results:
+                        continue
+                    
+                    scenario_results = all_scenario_results[label]
+                    
+                    # 첫 번째 시나리오 결과 사용 (일반적으로 가장 완전한 데이터)
+                    if not scenario_results:
+                        continue
+                    scenario_name, result = scenario_results[0]
+                    
+                    # 1. 감성 점수와 주가 시계열 비교 (이중 Y축)
+                    if result.merged_data is not None and not result.merged_data.empty:
+                        merged_viz = result.merged_data.copy()
+                        if "date" in merged_viz.columns:
+                            merged_viz["date"] = pd.to_datetime(merged_viz["date"])
+                            merged_viz = merged_viz.sort_values("date")
+                            
+                            # Topic 컬럼 찾기
+                            topic_cols = [col for col in merged_viz.columns if col.startswith("Topic ")]
+                            
+                            if topic_cols and len(topic_cols) > 0:
+                                # 평균 감성 점수 계산
+                                merged_viz["평균_감성점수"] = merged_viz[topic_cols].mean(axis=1)
+                                
+                                # 종가 컬럼 찾기
+                                price_col = None
+                                if "close" in merged_viz.columns:
+                                    price_col = "close"
+                                elif "Close" in merged_viz.columns:
+                                    price_col = "Close"
+                                elif "종가" in merged_viz.columns:
+                                    price_col = "종가"
+                                
+                                if price_col:
+                                    fig_dual = go.Figure()
+                                    
+                                    # 주가 (왼쪽 Y축)
+                                    fig_dual.add_trace(
+                                        go.Scatter(
+                                            x=merged_viz["date"],
+                                            y=merged_viz[price_col],
+                                            mode="lines",
+                                            name="주가",
+                                            line=dict(color="steelblue", width=2),
+                                            yaxis="y",
+                                            hovertemplate="날짜: %{x}<br>주가: %{y:,.0f}<extra></extra>",
+                                        )
+                                    )
+                                    
+                                    # 평균 감성 점수 (오른쪽 Y축)
+                                    fig_dual.add_trace(
+                                        go.Scatter(
+                                            x=merged_viz["date"],
+                                            y=merged_viz["평균_감성점수"],
+                                            mode="lines",
+                                            name="평균 감성 점수",
+                                            line=dict(color="crimson", width=2, dash="dash"),
+                                            yaxis="y2",
+                                            hovertemplate="날짜: %{x}<br>감성 점수: %{y:.4f}<extra></extra>",
+                                        )
+                                    )
+                                    
+                                    fig_dual.update_layout(
+                                        title=f"{label} - 주가와 감성 점수 시계열 비교",
+                                        xaxis_title="날짜",
+                                        yaxis=dict(title="주가", side="left", showgrid=False),
+                                        yaxis2=dict(title="평균 감성 점수", side="right", overlaying="y", showgrid=False),
+                                        hovermode="x unified",
+                                        height=500,
+                                        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+                                    )
+                                    st.plotly_chart(fig_dual, use_container_width=True)
+                    
+                    # 2. 토픽별 감성 점수 시계열
+                    if result.merged_data is not None and not result.merged_data.empty:
+                        merged_viz = result.merged_data.copy()
+                        if "date" in merged_viz.columns:
+                            merged_viz["date"] = pd.to_datetime(merged_viz["date"])
+                            merged_viz = merged_viz.sort_values("date")
+                            
+                            topic_cols = [col for col in merged_viz.columns if col.startswith("Topic ")]
+                            
+                            if topic_cols and len(topic_cols) > 0:
+                                fig_topics = go.Figure()
+                                colors_topic = px.colors.qualitative.Set3
+                                
+                                # 최대 10개 토픽만 표시 (너무 많으면 복잡함)
+                                display_topics = topic_cols[:10]
+                                
+                                for idx, topic_col in enumerate(display_topics):
+                                    fig_topics.add_trace(
+                                        go.Scatter(
+                                            x=merged_viz["date"],
+                                            y=merged_viz[topic_col],
+                                            mode="lines",
+                                            name=topic_col,
+                                            line=dict(color=colors_topic[idx % len(colors_topic)], width=1.5),
+                                            hovertemplate=f"<b>{topic_col}</b><br>날짜: %{{x}}<br>감성 점수: %{{y:.4f}}<extra></extra>",
+                                        )
+                                    )
+                                
+                                fig_topics.update_layout(
+                                    title=f"{label} - 토픽별 감성 점수 시계열",
+                                    xaxis_title="날짜",
+                                    yaxis_title="감성 점수",
+                                    hovermode="x unified",
+                                    height=500,
+                                    legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+                                )
+                                st.plotly_chart(fig_topics, use_container_width=True)
+                    
+                    # 3. 회귀 잔차(Residuals) 플롯
+                    if result.model is not None:
+                        try:
+                            residuals = result.model.resid
+                            fitted_values = result.model.fittedvalues
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                # 잔차 시계열
+                                if result.merged_data is not None and "date" in result.merged_data.columns:
+                                    merged_viz = result.merged_data.copy()
+                                    merged_viz["date"] = pd.to_datetime(merged_viz["date"])
+                                    merged_viz = merged_viz.sort_values("date")
+                                    
+                                    fig_resid_ts = go.Figure()
+                                    fig_resid_ts.add_trace(
+                                        go.Scatter(
+                                            x=merged_viz["date"],
+                                            y=residuals,
+                                            mode="markers+lines",
+                                            name="잔차",
+                                            marker=dict(size=4, color="steelblue"),
+                                            line=dict(width=1, color="steelblue"),
+                                            hovertemplate="날짜: %{x}<br>잔차: %{y:.4f}<extra></extra>",
+                                        )
+                                    )
+                                    fig_resid_ts.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="0")
+                                    fig_resid_ts.update_layout(
+                                        title=f"{label} - 잔차 시계열",
+                                        xaxis_title="날짜",
+                                        yaxis_title="잔차",
+                                        height=400,
+                                    )
+                                    st.plotly_chart(fig_resid_ts, use_container_width=True)
+                            
+                            with col2:
+                                # 잔차 히스토그램
+                                fig_resid_hist = go.Figure()
+                                fig_resid_hist.add_trace(
+                                    go.Histogram(
+                                        x=residuals,
+                                        nbinsx=30,
+                                        name="잔차 분포",
+                                        marker_color="steelblue",
+                                        opacity=0.7,
+                                    )
+                                )
+                                fig_resid_hist.add_vline(x=0, line_dash="dash", line_color="red", annotation_text="0")
+                                fig_resid_hist.update_layout(
+                                    title=f"{label} - 잔차 분포",
+                                    xaxis_title="잔차",
+                                    yaxis_title="빈도",
+                                    height=400,
+                                )
+                                st.plotly_chart(fig_resid_hist, use_container_width=True)
+                            
+                            # 예측값 vs 실제값 산점도
+                            if result.merged_data is not None:
+                                target_col = None
+                                if "daily_return" in result.merged_data.columns:
+                                    target_col = "daily_return"
+                                elif "close" in result.merged_data.columns:
+                                    target_col = "close"
+                                
+                                if target_col:
+                                    actual_values = result.merged_data[target_col].dropna()
+                                    if len(actual_values) == len(fitted_values):
+                                        fig_pred = go.Figure()
+                                        fig_pred.add_trace(
+                                            go.Scatter(
+                                                x=actual_values,
+                                                y=fitted_values,
+                                                mode="markers",
+                                                name="예측값 vs 실제값",
+                                                marker=dict(size=5, color="steelblue", opacity=0.6),
+                                                hovertemplate="실제값: %{x:.4f}<br>예측값: %{y:.4f}<extra></extra>",
+                                            )
+                                        )
+                                        
+                                        # 완벽한 예측선 (y=x)
+                                        min_val = min(actual_values.min(), fitted_values.min())
+                                        max_val = max(actual_values.max(), fitted_values.max())
+                                        fig_pred.add_trace(
+                                            go.Scatter(
+                                                x=[min_val, max_val],
+                                                y=[min_val, max_val],
+                                                mode="lines",
+                                                name="완벽한 예측선 (y=x)",
+                                                line=dict(color="red", dash="dash", width=2),
+                                            )
+                                        )
+                                        
+                                        fig_pred.update_layout(
+                                            title=f"{label} - 예측값 vs 실제값",
+                                            xaxis_title="실제값",
+                                            yaxis_title="예측값",
+                                            height=500,
+                                            showlegend=True,
+                                        )
+                                        st.plotly_chart(fig_pred, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"잔차 플롯 생성 중 오류: {e}")
+                    
+                    # 4. 감성 점수 분포 히스토그램
+                    if result.merged_data is not None and not result.merged_data.empty:
+                        merged_viz = result.merged_data.copy()
+                        topic_cols = [col for col in merged_viz.columns if col.startswith("Topic ")]
+                        
+                        if topic_cols and len(topic_cols) > 0:
+                            # 모든 토픽의 감성 점수를 하나의 배열로 합치기
+                            all_sentiment_scores = []
+                            for topic_col in topic_cols:
+                                scores = merged_viz[topic_col].dropna().tolist()
+                                all_sentiment_scores.extend(scores)
+                            
+                            if all_sentiment_scores:
+                                fig_sentiment_dist = go.Figure()
+                                fig_sentiment_dist.add_trace(
+                                    go.Histogram(
+                                        x=all_sentiment_scores,
+                                        nbinsx=50,
+                                        name="감성 점수 분포",
+                                        marker_color="steelblue",
+                                        opacity=0.7,
+                                    )
+                                )
+                                fig_sentiment_dist.add_vline(x=0, line_dash="dash", line_color="red", annotation_text="0 (중립)")
+                                fig_sentiment_dist.update_layout(
+                                    title=f"{label} - 감성 점수 분포",
+                                    xaxis_title="감성 점수",
+                                    yaxis_title="빈도",
+                                    height=400,
+                                )
+                                st.plotly_chart(fig_sentiment_dist, use_container_width=True)
+                
+                # 5. 모델 성능 지표 비교 차트 (모든 시나리오)
+                if len(scenario_results) > 1:
+                    st.markdown("---")
+                    st.markdown(f"## {label} - 모델 성능 지표 비교")
+                    
+                    # 모든 시나리오의 진단 지표 수집
+                    metrics_data = []
+                    for sn, res in scenario_results:
+                        if res.diagnostics is not None and not res.diagnostics.empty:
+                            metrics_data.append({
+                                "시나리오": sn,
+                                "R-squared": res.diagnostics["rsquared"].iloc[0],
+                                "Adjusted R-squared": res.diagnostics["adj_rsquared"].iloc[0],
+                                "AIC": res.diagnostics["aic"].iloc[0],
+                                "BIC": res.diagnostics["bic"].iloc[0],
+                                "표본 수": res.n_samples,
+                            })
+                    
+                    if metrics_data:
+                        metrics_df = pd.DataFrame(metrics_data)
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            # R-squared 비교
+                            fig_rsq = go.Figure()
+                            fig_rsq.add_trace(
+                                go.Bar(
+                                    x=metrics_df["시나리오"],
+                                    y=metrics_df["R-squared"],
+                                    name="R-squared",
+                                    marker_color="steelblue",
+                                    text=[f"{v:.4f}" for v in metrics_df["R-squared"]],
+                                    textposition="outside",
+                                )
+                            )
+                            fig_rsq.update_layout(
+                                title="R-squared 비교",
+                                xaxis_title="시나리오",
+                                yaxis_title="R-squared",
+                                height=400,
+                                xaxis=dict(tickangle=-45),
+                            )
+                            st.plotly_chart(fig_rsq, use_container_width=True)
+                        
+                        with col2:
+                            # AIC 비교
+                            fig_aic = go.Figure()
+                            fig_aic.add_trace(
+                                go.Bar(
+                                    x=metrics_df["시나리오"],
+                                    y=metrics_df["AIC"],
+                                    name="AIC",
+                                    marker_color="crimson",
+                                    text=[f"{v:.2f}" for v in metrics_df["AIC"]],
+                                    textposition="outside",
+                                )
+                            )
+                            fig_aic.update_layout(
+                                title="AIC 비교 (낮을수록 좋음)",
+                                xaxis_title="시나리오",
+                                yaxis_title="AIC",
+                                height=400,
+                                xaxis=dict(tickangle=-45),
+                            )
+                            st.plotly_chart(fig_aic, use_container_width=True)
 
 
     # ==============================
-    # 12. 종목 코드 확인 버튼 로직
+    # 13. 종목 코드 확인 버튼 로직
     # ==============================
     if lookup_pressed:
         if sentiment_df is None:

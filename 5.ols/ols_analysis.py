@@ -30,6 +30,8 @@ class RegressionResult:
     output_path: Optional[Path] = None
     coefficients: Optional[pd.DataFrame] = None
     diagnostics: Optional[pd.DataFrame] = None
+    model: Optional[sm.regression.linear_model.RegressionResultsWrapper] = None
+    merged_data: Optional[pd.DataFrame] = None
 
 
 def summarize_coefficients(model: sm.regression.linear_model.RegressionResultsWrapper) -> pd.DataFrame:
@@ -874,6 +876,8 @@ def run_topic_regression_from_frames(
         summary=summary_text,
         coefficients=coefficients,
         diagnostics=diagnostics,
+        model=model,
+        merged_data=merged.copy(),
     )
     return result
 
@@ -970,6 +974,8 @@ def run_regression_from_frames(
         summary=summary_text,
         coefficients=coefficients,
         diagnostics=extract_model_metrics(model),
+        model=model,
+        merged_data=merged.copy(),
     )
 
 
