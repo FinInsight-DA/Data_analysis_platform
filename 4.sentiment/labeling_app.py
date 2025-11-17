@@ -1,6 +1,8 @@
 import os
 import sys
 import tempfile
+import json
+from datetime import datetime
 
 CURRENT_DIR = os.path.dirname(__file__)
 if CURRENT_DIR not in sys.path:
@@ -12,15 +14,52 @@ import torch
 from sentiment_labeling import run_sentiment_labeling
 
 
+# ============================================================================
+# CSS 스타일
+# ============================================================================
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .sub-header {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #2c3e50;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
 def main():
-    st.subheader("📌 감성 라벨링")
+    st.markdown('<div class="sub-header">📌 감성 라벨링</div>', unsafe_allow_html=True)
 
     # GPU/CPU 상태 표시
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
-        st.success(f"⚡ GPU 사용 중: {gpu_name}")
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            ⚡ <strong>GPU 사용 중:</strong> {gpu_name}
+        </div>
+        """, unsafe_allow_html=True)
+    elif torch.backends.mps.is_available():
+        st.markdown("""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            🍎 <strong>Apple Silicon GPU (MPS) 사용 중</strong>
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        st.warning("💻 GPU 미사용 - CPU로 실행됩니다.")
+        st.markdown("""
+        <div style="border: 2px solid #E0E0E0; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            💻 <strong>GPU 미사용</strong> - CPU로 실행됩니다.
+        </div>
+        """, unsafe_allow_html=True)
 
     # 세션 상태 초기화
     for key in ["df_result", "output_path", "labeling_in_progress", "labeling_done"]:
@@ -34,10 +73,49 @@ def main():
     uploaded_data = st.file_uploader("라벨링할 CSV 업로드", type=["csv"], key="label_csv")
     uploaded_dict = st.file_uploader("감성사전 JSON 업로드", type=["json"], key="label_json")
 
+    # JSON 편집기
+    if uploaded_dict is not None:
+        with st.expander("📝 감성사전 JSON 수정 및 저장"):
+            dict_content = uploaded_dict.read().decode('utf-8')
+            uploaded_dict.seek(0)  # 파일 포인터 리셋
+            
+            edited_json = st.text_area(
+                "JSON 내용 편집",
+                value=dict_content,
+                height=400,
+                key='sentiment_json_editor'
+            )
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("💾 수정된 JSON 저장", use_container_width=True, key="save_sentiment_json"):
+                    try:
+                        # JSON 유효성 검사
+                        json.loads(edited_json)
+                        st.download_button(
+                            label="📥 수정된 감성사전 다운로드",
+                            data=edited_json,
+                            file_name=f"sentiment_dict_edited_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                            mime="application/json",
+                            use_container_width=True,
+                            key="download_sentiment_json"
+                        )
+                    except json.JSONDecodeError as e:
+                        st.error(f"❌ JSON 형식 오류: {e}")
+            
+            with col_b:
+                if st.button("🔄 원본으로 되돌리기", use_container_width=True, key="reset_sentiment_json"):
+                    st.session_state.sentiment_json_editor = dict_content
+                    st.rerun()
+
     if not uploaded_data or not uploaded_dict:
         st.info("CSV와 JSON 파일을 모두 업로드하면 감성 라벨링을 시작할 수 있습니다.")
     else:
-        st.success("✅ 두 파일 모두 업로드 완료!")
+        st.markdown("""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            ✅ <strong>두 파일 모두 업로드 완료!</strong>
+        </div>
+        """, unsafe_allow_html=True)
 
         df_preview = pd.read_csv(uploaded_data)
         st.markdown("---")
@@ -62,7 +140,13 @@ def main():
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_data, \
              tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp_dict:
             tmp_data.write(uploaded_data.getbuffer())
-            tmp_dict.write(uploaded_dict.getbuffer())
+            
+            # JSON 편집기에서 수정된 내용 사용
+            if 'sentiment_json_editor' in st.session_state and st.session_state.sentiment_json_editor:
+                tmp_dict.write(st.session_state.sentiment_json_editor.encode('utf-8'))
+            else:
+                tmp_dict.write(uploaded_dict.getbuffer())
+            
             tmp_data_path, tmp_dict_path = tmp_data.name, tmp_dict.name
 
         output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".csv").name
@@ -109,7 +193,11 @@ def main():
 
     # 완료 메시지 + 결과 미리보기 + 다운로드
     if st.session_state.labeling_done and st.session_state.df_result is not None:
-        st.success("✅ 전체 감성 라벨링 완료!")
+        st.markdown("""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            ✅ <strong>전체 감성 라벨링 완료!</strong>
+        </div>
+        """, unsafe_allow_html=True)
 
         st.markdown("---")
         st.subheader("라벨링 결과 미리보기")

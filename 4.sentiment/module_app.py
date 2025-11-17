@@ -15,20 +15,59 @@ from sentiment_module import run_selected_models
 from sentiment_absa import ABSAModel
 
 
+# ============================================================================
+# CSS 스타일
+# ============================================================================
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .sub-header {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #2c3e50;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
 def main():
+    st.markdown('<div class="sub-header">모델 비교 & ABSA</div>', unsafe_allow_html=True)
+    
     # =========================
     # GPU 상태 표시
     # =========================
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
-        st.success(f"⚡ GPU 사용 중: {gpu_name}")
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            ⚡ <strong>GPU 사용 중:</strong> {gpu_name}
+        </div>
+        """, unsafe_allow_html=True)
+    elif torch.backends.mps.is_available():
+        st.markdown("""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            🍎 <strong>Apple Silicon GPU (MPS) 사용 중</strong>
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        st.warning("💻 GPU 미사용 - CPU로 실행됩니다.")
+        st.markdown("""
+        <div style="border: 2px solid #E0E0E0; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            💻 <strong>GPU 미사용</strong> - CPU로 실행됩니다.
+        </div>
+        """, unsafe_allow_html=True)
 
     # =========================
     # 초기화 버튼
     # =========================
-    if st.button("🧹 초기화"):
+    if st.button("초기화"):
         for key in ["final_result", "absa_result", "absa_model", "uploaded_file_path"]:
             if key in st.session_state:
                 del st.session_state[key]
@@ -61,7 +100,7 @@ def main():
     # =========================
     # 모델 선택
     # =========================
-    st.subheader("🔍 모델 선택 및 학습")
+    st.subheader("모델 선택 및 학습")
     col1, col2 = st.columns(2)
     with col1:
         selected_ml = st.multiselect(
@@ -118,13 +157,17 @@ def main():
 
         # 결과 저장
         st.session_state.final_result = pd.concat(results, ignore_index=True)
-        st.success("🎉 모든 모델 학습이 완료되었습니다!")
+        st.markdown("""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            🎉 <strong>모든 모델 학습이 완료되었습니다!</strong>
+        </div>
+        """, unsafe_allow_html=True)
 
     # =========================
     # 학습 결과 출력
     # =========================
     with st.container():
-        st.subheader("📈 모델 성능 비교")
+        st.subheader("모델 성능 비교")
         if "final_result" in st.session_state:
             st.dataframe(st.session_state.final_result)
 
@@ -147,7 +190,7 @@ def main():
     # =========================
     # ABSA 감성 분석
     # =========================
-    st.subheader("💬 ABSA 감성 분석")
+    st.subheader("ABSA 감성 분석")
 
     user_friendly_models = ["KoBERT", "KoELECTRA", "KoRoBERTa", "BERT"]
     model_mapping = {
@@ -163,7 +206,7 @@ def main():
     model_choice_path = model_mapping[model_choice_user]
 
     # ABSA 분석 버튼
-    if st.button("🚀 ABSA 분석 시작"):
+    if st.button("ABSA 분석 시작"):
         for key in ["absa_result", "absa_model"]:
             if key in st.session_state:
                 del st.session_state[key]
@@ -195,7 +238,11 @@ def main():
     # ABSA 결과 출력 + CSV 다운로드
     # =========================
     if "absa_result" in st.session_state:
-        st.success("🎉 ABSA 감성 분석 완료!")
+        st.markdown("""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            🎉 <strong>ABSA 감성 분석 완료!</strong>
+        </div>
+        """, unsafe_allow_html=True)
         st.write("💡 감성 분석 결과 미리보기")
         st.dataframe(st.session_state.absa_result.head(10))
 

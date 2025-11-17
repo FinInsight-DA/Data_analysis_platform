@@ -28,7 +28,6 @@ from sentence_transformers import SentenceTransformer
 # ============================================================================
 st.set_page_config(
     page_title="BERTopic 토픽 모델링",
-    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -103,7 +102,7 @@ def create_topic_distribution_chart(topics):
             y=topic_counts.values,
             text=topic_counts.values,
             textposition='auto',
-            marker_color='#1f77b4'
+            marker_color='#1565C0'
         )
     ])
     
@@ -125,7 +124,7 @@ def create_outlier_chart(topics):
         go.Pie(
             labels=['토픽 할당', 'Outlier'],
             values=[topic_count, outlier_count],
-            marker_colors=['#2ecc71', '#e74c3c'],
+            marker_colors=['#0D47A1','#1565C0'],
             hole=0.4
         )
     ])
@@ -163,7 +162,7 @@ def create_keywords_table(topic_model, topics):
 # ============================================================================
 def main():
     # 헤더
-    st.markdown('<div class="main-header">🎯 BERTopic 토픽 모델링</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">BERTopic 토픽 모델링</div>', unsafe_allow_html=True)
     st.markdown("---")
     
     # ============================================================================
@@ -184,7 +183,11 @@ def main():
     # 데이터 로드
     try:
         df = pd.read_csv(uploaded_file)
-        st.success(f"✅ 데이터 로드 완료: {len(df):,}개 문서")
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            ✅ <strong>데이터 로드 완료:</strong> {len(df):,}개 문서
+        </div>
+        """, unsafe_allow_html=True)
         
         if 'sentence' not in df.columns:
             st.error("❌ 'sentence' 컬럼이 없습니다.")
@@ -452,7 +455,11 @@ def main():
                 progress_bar.progress(100)
                 status_text.text(f"✅ 임베딩 생성 완료!")
                 
-                st.success(f"✅ 임베딩 생성 완료: {embeddings.shape}")
+                st.markdown(f"""
+                <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                    ✅ <strong>임베딩 생성 완료:</strong> {embeddings.shape}
+                </div>
+                """, unsafe_allow_html=True)
                 
                 # progress bar 정리
                 time.sleep(0.5)
@@ -537,7 +544,11 @@ def main():
             progress_bar.progress(100)
             status_text.text("✅ 학습 완료!")
             
-            st.success("✅ 학습 완료!")
+            st.markdown("""
+            <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                ✅ <strong>학습 완료!</strong>
+            </div>
+            """, unsafe_allow_html=True)
             
             # progress bar 정리
             time.sleep(0.5)
@@ -550,7 +561,11 @@ def main():
                 with st.spinner("전체 데이터에 토픽 할당 중..."):
                     topics, _ = topic_model.transform(texts, embeddings)
                     topics = np.array(topics)
-                st.success("✅ 예측 완료!")
+                st.markdown("""
+                <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                    ✅ <strong>예측 완료!</strong>
+                </div>
+                """, unsafe_allow_html=True)
             
             # 결과 저장
             st.session_state['topic_model'] = topic_model
@@ -560,7 +575,11 @@ def main():
             st.session_state['df_result']['outlier'] = (topics == -1).astype(int)
             
             elapsed = time.time() - start_time
-            st.success(f"🎉 전체 완료! (총 소요 시간: {elapsed/60:.1f}분)")
+            st.markdown(f"""
+            <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                🎉 <strong>전체 완료!</strong> (총 소요 시간: {elapsed/60:.1f}분)
+            </div>
+            """, unsafe_allow_html=True)
             
         except Exception as e:
             st.error(f"❌ 오류 발생: {e}")
@@ -668,30 +687,45 @@ def main():
         # 토픽 선택 UI
         col1, col2 = st.columns([3, 1])
         
-        with col1:
-            # 선택 가능한 토픽 목록
-            available_topics = unique_topics.copy()
-            if include_outlier:
-                available_topics = [-1] + available_topics
+        # 선택 가능한 토픽 목록
+        available_topics = unique_topics.copy()
+        if include_outlier:
+            available_topics = [-1] + available_topics
+        
+        # session_state 초기화
+        if 'selected_bertopic_list' not in st.session_state:
+            st.session_state['selected_bertopic_list'] = unique_topics[:min(3, len(unique_topics))]
+        
+        with col2:
+            if st.button("🔄 전체 선택", key="select_all", use_container_width=True):
+                st.session_state['selected_bertopic_list'] = available_topics
+                st.rerun()
             
+            if st.button("❌ 전체 해제", key="clear_all", use_container_width=True):
+                st.session_state['selected_bertopic_list'] = []
+                st.rerun()
+        
+        with col1:
             selected_topics = st.multiselect(
                 "분석할 토픽 선택",
                 options=available_topics,
-                default=unique_topics[:min(3, len(unique_topics))],  # 기본: 처음 3개
+                default=st.session_state['selected_bertopic_list'],
                 help="여러 개 선택 가능합니다. 선택한 토픽만 필터링하여 저장됩니다.",
                 format_func=lambda x: f"Topic {x}" if x != -1 else "Outlier (-1)"
             )
-        
-        with col2:
-            if st.button("🔄 전체 선택", key="select_all"):
-                selected_topics = available_topics
-                st.rerun()
+            
+            # multiselect 값이 변경되면 session_state 업데이트
+            st.session_state['selected_bertopic_list'] = selected_topics
         
         # 선택 결과 표시
         if selected_topics:
             filtered_df = df_result[df_result['bertopic_topic'].isin(selected_topics)].copy()
             
-            st.success(f"✅ {len(selected_topics)}개 토픽 선택됨 (총 {len(filtered_df):,}개 문서)")
+            st.markdown(f"""
+            <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                ✅ <strong>{len(selected_topics)}개 토픽 선택됨</strong> (총 {len(filtered_df):,}개 문서)
+            </div>
+            """, unsafe_allow_html=True)
             
             # 선택한 토픽 요약
             with st.expander("📊 선택한 토픽 요약"):
@@ -772,7 +806,11 @@ def main():
             if st.button("💾 파일로 저장", key="save_csv", use_container_width=True):
                 try:
                     filtered_df.to_csv(save_path, index=False, encoding='utf-8-sig')
-                    st.success(f"✅ 저장 완료!\n{save_path}")
+                    st.markdown(f"""
+                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                        ✅ <strong>저장 완료!</strong><br>{save_path}
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     # 파일 크기 표시
                     import os
@@ -807,7 +845,11 @@ def main():
                         selected_info = topic_info_df[topic_info_df['Topic ID'].isin(selected_topics)]
                         selected_info.to_excel(writer, index=False, sheet_name='선택한토픽정보')
                     
-                    st.success(f"✅ 저장 완료!\n{save_path_excel}")
+                    st.markdown(f"""
+                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                        ✅ <strong>저장 완료!</strong><br>{save_path_excel}
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     import os
                     file_size = os.path.getsize(save_path_excel) / 1024
@@ -859,7 +901,11 @@ def main():
                     with open(save_path_json, 'w', encoding='utf-8') as f:
                         json.dump(metadata, f, ensure_ascii=False, indent=2)
                     
-                    st.success(f"✅ 저장 완료!\n{save_path_json}")
+                    st.markdown(f"""
+                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                        ✅ <strong>저장 완료!</strong><br>{save_path_json}
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     import os
                     file_size = os.path.getsize(save_path_json) / 1024

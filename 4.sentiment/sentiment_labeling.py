@@ -184,7 +184,23 @@ def train_and_label_neutral_sentences(df, POS_BASE, NEG_BASE, ASPECT_POS, ASPECT
     tr_ds.set_format(type="torch", columns=["input_ids","attention_mask","labels"])
     va_ds.set_format(type="torch", columns=["input_ids","attention_mask","labels"])
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # 디바이스 자동 선택 (MPS 에러 방지 포함)
+    if torch.cuda.is_available():
+        device = "cuda"  # NVIDIA GPU
+        print("✅ CUDA GPU 사용")
+    elif torch.backends.mps.is_available():
+        try:
+            # MPS 테스트
+            test_tensor = torch.zeros(1).to("mps")
+            device = "mps"  # Mac M1/M2 GPU
+            print("✅ Apple MPS GPU 사용")
+        except:
+            device = "cpu"  # MPS 에러시 CPU 사용
+            print("⚠️ MPS 에러 발생 - CPU 사용")
+    else:
+        device = "cpu"
+        print("💻 CPU 사용")
+    
     model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=3)
     model.to(device)
 
