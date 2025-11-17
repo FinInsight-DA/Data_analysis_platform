@@ -784,135 +784,89 @@ def main():
         # ============================================================================
         # 5. 결과 저장
         # ============================================================================
-        st.markdown('<div class="sub-header">💾 4. 결과 저장</div>', unsafe_allow_html=True)
-        
-        st.info(f"💡 **선택한 토픽 ({len(selected_topics)}개)의 데이터만 저장됩니다** ({len(filtered_df):,}개 문서)")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        # CSV 저장
-        with col1:
-            st.write("**💾 CSV 저장**")
-            
-            default_path = str(Path.home() / "Desktop" / f"bertopic_result_selected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-            
-            save_path = st.text_input(
-                "저장 경로",
-                value=default_path,
-                help="파일을 저장할 경로를 입력하세요",
-                key="csv_path"
-            )
-            
-            if st.button("💾 파일로 저장", key="save_csv", use_container_width=True):
-                try:
-                    filtered_df.to_csv(save_path, index=False, encoding='utf-8-sig')
-                    st.markdown(f"""
-                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
-                        ✅ <strong>저장 완료!</strong><br>{save_path}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # 파일 크기 표시
-                    import os
-                    file_size = os.path.getsize(save_path) / 1024
-                    st.info(f"📊 파일 크기: {file_size:.2f} KB")
-                    
-                except Exception as e:
-                    st.error(f"❌ 저장 실패: {str(e)}")
-            
-            st.caption(f"💡 선택한 토픽: {len(selected_topics)}개\n문서: {len(filtered_df):,}개")
-        
-        # Excel 저장
-        with col2:
-            st.write("**💾 Excel 저장**")
-            
-            default_path_excel = str(Path.home() / "Desktop" / f"bertopic_result_selected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
-            
-            save_path_excel = st.text_input(
-                "저장 경로 (Excel)",
-                value=default_path_excel,
-                help="Excel 파일을 저장할 경로를 입력하세요",
-                key="excel_path"
-            )
-            
-            if st.button("💾 Excel로 저장", key="save_excel", use_container_width=True):
-                try:
-                    with pd.ExcelWriter(save_path_excel, engine='openpyxl') as writer:
-                        filtered_df.to_excel(writer, index=False, sheet_name='선택한토픽')
-                        keywords_df.to_excel(writer, index=False, sheet_name='전체토픽키워드')
-                        
-                        # 선택한 토픽 정보 시트 추가
-                        selected_info = topic_info_df[topic_info_df['Topic ID'].isin(selected_topics)]
-                        selected_info.to_excel(writer, index=False, sheet_name='선택한토픽정보')
-                    
-                    st.markdown(f"""
-                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
-                        ✅ <strong>저장 완료!</strong><br>{save_path_excel}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    import os
-                    file_size = os.path.getsize(save_path_excel) / 1024
-                    st.info(f"📊 파일 크기: {file_size:.2f} KB")
-                    
-                except Exception as e:
-                    st.error(f"❌ 저장 실패: {str(e)}")
-            
-            st.caption("💡 3개 시트 포함\n(선택한토픽, 전체토픽키워드, 선택한토픽정보)")
-        
-        # 메타데이터 저장
-        with col3:
-            st.write("**💾 메타데이터 저장**")
-            
-            default_path_json = str(Path.home() / "Desktop" / f"bertopic_metadata_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-            
-            save_path_json = st.text_input(
-                "저장 경로 (JSON)",
-                value=default_path_json,
-                help="메타데이터 JSON 파일을 저장할 경로를 입력하세요",
-                key="json_path"
-            )
-            
-            if st.button("💾 JSON으로 저장", key="save_json", use_container_width=True):
-                try:
-                    metadata = {
-                        'n_topics': n_topics,
-                        'selected_topics': [int(t) for t in selected_topics],
-                        'filtered_documents': len(filtered_df),
-                        'outlier_count': int(outlier_count),
-                        'outlier_percentage': float(outlier_pct),
-                        'total_documents': len(topics),
-                        'parameters': {
-                            'embedding_model': embedding_model_key,
-                            'n_components': n_components,
-                            'n_neighbors': n_neighbors,
-                            'min_dist': min_dist,
-                            'min_cluster_size': min_cluster_size,
-                            'min_samples': min_samples,
-                            'topic_mode': topic_mode,
-                            'nr_topics': nr_topics if topic_mode == '수동' else 'auto',
-                            'max_features': max_features,
-                            'max_df': max_df,
-                            'ngram_range': f"(1, {ngram_max})"
-                        },
-                        'timestamp': datetime.now().isoformat()
-                    }
-                    
-                    with open(save_path_json, 'w', encoding='utf-8') as f:
-                        json.dump(metadata, f, ensure_ascii=False, indent=2)
-                    
-                    st.markdown(f"""
-                    <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
-                        ✅ <strong>저장 완료!</strong><br>{save_path_json}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    import os
-                    file_size = os.path.getsize(save_path_json) / 1024
-                    st.info(f"📊 파일 크기: {file_size:.2f} KB")
-                    
-                except Exception as e:
-                    st.error(f"❌ 저장 실패: {str(e)}")
+        st.markdown("### 📥 결과 다운로드")
+
+        if df_result is not None:
+
+            # 기본 저장 디렉터리: 사용자 홈의 Downloads
+            default_dir = Path.home() / "Downloads"
+            default_dir.mkdir(parents=True, exist_ok=True)
+
+            now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            default_csv_path   = default_dir / f"bertopic_topics_{now_str}.csv"
+            default_excel_path = default_dir / f"bertopic_topics_{now_str}.xlsx"
+            default_json_path  = default_dir / f"bertopic_metadata_{now_str}.json"
+
+            col1, col2, col3 = st.columns(3)
+
+            # ---------------------- CSV 저장 ----------------------
+            with col1:
+                st.write("📁 CSV 저장")
+
+                csv_path_str = st.text_input(
+                    "저장 경로 (CSV)",
+                    value=str(default_csv_path),
+                    key="bertopic_csv_path",
+                    help="예) C:/Users/User/Downloads/bertopic_topics_20251117_123456.csv"
+                )
+
+                if st.button("📥 CSV 파일 저장", use_container_width=True, key="save_csv"):
+                    try:
+                        save_path = Path(csv_path_str)
+                        save_path.parent.mkdir(parents=True, exist_ok=True)
+                        df_result.to_csv(save_path, index=False, encoding="utf-8-sig")
+                        st.success(f"CSV 파일이 저장되었습니다: {save_path}")
+                    except Exception as e:
+                        st.error(f"CSV 저장 중 오류가 발생했습니다: {e}")
+
+            # ---------------------- Excel 저장 ----------------------
+            with col2:
+                st.write("📊 Excel 저장")
+
+                excel_path_str = st.text_input(
+                    "저장 경로 (Excel)",
+                    value=str(default_excel_path),
+                    key="bertopic_excel_path",
+                    help="예) C:/Users/User/Downloads/bertopic_topics_20251117_123456.xlsx"
+                )
+
+                if st.button("📥 Excel 파일 저장", use_container_width=True, key="save_excel"):
+                    try:
+                        save_path = Path(excel_path_str)
+                        save_path.parent.mkdir(parents=True, exist_ok=True)
+                        df_result.to_excel(save_path, index=False, engine="openpyxl")
+                        st.success(f"Excel 파일이 저장되었습니다: {save_path}")
+                    except Exception as e:
+                        st.error(f"Excel 저장 중 오류가 발생했습니다: {e}")
+
+            # ---------------------- 메타데이터 JSON 저장 ----------------------
+            with col3:
+                st.write("🧾 메타데이터 저장 (JSON)")
+
+                json_path_str = st.text_input(
+                    "저장 경로 (JSON)",
+                    value=str(default_json_path),
+                    key="bertopic_json_path",
+                    help="예) C:/Users/User/Downloads/bertopic_metadata_20251117_123456.json"
+                )
+
+                if st.button("📥 JSON 파일 저장", use_container_width=True, key="save_json"):
+                    try:
+                        save_path = Path(json_path_str)
+                        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+                        # metadata_dict 는 이미 위에서 만든 메타데이터 딕셔너리라고 가정
+                        import json
+                        with open(save_path, "w", encoding="utf-8") as f:
+                            json.dump(metadata_dict, f, ensure_ascii=False, indent=2)
+
+                        st.success(f"JSON 파일이 저장되었습니다: {save_path}")
+                    except Exception as e:
+                        st.error(f"JSON 저장 중 오류가 발생했습니다: {e}")
+        else:
+            st.info("먼저 BERTopic 모델 학습을 완료하면 다운로드 옵션이 나타납니다.")
+
 
 if __name__ == "__main__":
     main()
