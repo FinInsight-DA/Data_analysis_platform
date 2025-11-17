@@ -104,7 +104,6 @@ with st.sidebar.expander("ℹ️ 사용 가이드", expanded=False):
     st.write(
 
         "- 환경 패키지는 폴더별 `requirements*.txt` 참고.\n"
-
     )
 
 # 페이지 실행
