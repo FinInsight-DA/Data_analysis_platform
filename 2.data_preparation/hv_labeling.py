@@ -173,7 +173,10 @@ def check_company_mentions(sent: str, company_config: dict = None) -> dict:
 
 def add_company_columns(df, company_config: dict = None):
     """
-    DataFrame에 회사별 불리언 컬럼 및 company 컬럼 추가
+    DataFrame에 company 컬럼 추가
+    - 한 회사만 언급: 해당 회사명
+    - 두 회사 이상 언급: "both"
+    - 언급 없음: None
     
     Args:
         df: 입력 DataFrame (sentence 컬럼 필요)
@@ -185,22 +188,21 @@ def add_company_columns(df, company_config: dict = None):
     if company_config is None:
         company_config = DEFAULT_COMPANY_CONFIG
     
-    # 각 회사별 불리언 컬럼 생성
+    # 회사 언급 확인
     company_checks = df['sentence'].apply(lambda x: check_company_mentions(x, company_config))
     
-    for company_name in company_config.keys():
-        # 회사명에서 공백 제거하여 컬럼명으로 사용 (예: 'SK Hynix' -> 'is_sk_hynix')
-        col_name = f"is_{company_name.lower().replace(' ', '_')}"
-        df[col_name] = company_checks.apply(lambda x: x.get(company_name, False))
+    # company 컬럼 생성 (두 회사 모두 언급된 경우 "both"로 설정)
+    def determine_company(checks_dict):
+        mentioned_companies = [company for company, is_mentioned in checks_dict.items() if is_mentioned]
+        if len(mentioned_companies) == 0:
+            return None
+        elif len(mentioned_companies) == 1:
+            return mentioned_companies[0]
+        else:
+            # 두 회사 이상 언급된 경우
+            return "both"
     
-    # company 컬럼 생성 (여러 회사 중 하나만 선택)
-    conditions = [df[f"is_{company_name.lower().replace(' ', '_')}"] == True 
-                  for company_name in company_config.keys()]
-    df['company'] = np.select(
-        conditions,
-        list(company_config.keys()),
-        default=None
-    )
+    df['company'] = company_checks.apply(determine_company)
     
     return df
 
@@ -225,7 +227,7 @@ def main():
     # sentence 생성
     df['sentence'] = df['title'].fillna('') + ' ' + df['content'].fillna('')
 
-    # company 컬럼 추가 (is_samsung, is_skhynix 포함)
+    # company 컬럼 추가 (두 회사 모두 언급된 경우 "both"로 설정)
     df = add_company_columns(df)
 
     # 라벨링 실행
@@ -258,7 +260,7 @@ def main():
     print(f"Unknown 제외: {df_original_len:,}개 -> {len(df):,}개\n")
 
     # 컬럼 순서 정리
-    output_cols = ['title', 'content', 'sentence', 'company', 'is_samsung', 'is_skhynix', 'inp_date',
+    output_cols = ['title', 'content', 'sentence', 'company', 'inp_date',
                    'label', 'HV_type', 'match_count',
                    'aspect_category', 'aspect_term']
     output_cols = [col for col in output_cols if col in df.columns]
