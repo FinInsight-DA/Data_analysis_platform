@@ -63,9 +63,66 @@ def main():
     lookup_pressed = False
     submitted = False
 
+    def create_company_column_from_flags(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        is_samsung과 is_skhynix 컬럼을 이용해서 company 컬럼 생성
+        - 둘 다 True: "both"
+        - is_samsung만 True: "Samsung Electronics"
+        - is_skhynix만 True: "SK Hynix"
+        - 둘 다 False: None
+        """
+        if "company" in df.columns:
+            return df
+        
+        has_samsung = "is_samsung" in df.columns
+        has_skhynix = "is_skhynix" in df.columns
+        
+        if not (has_samsung or has_skhynix):
+            return df
+        
+        # 불리언 값 정규화 (True/False, 1/0, "True"/"False" 등 처리)
+        def normalize_bool(val):
+            if pd.isna(val):
+                return False
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, (int, float)):
+                return bool(val)
+            if isinstance(val, str):
+                return val.lower() in ['true', '1', 'yes', 't']
+            return False
+        
+        samsung_flags = df["is_samsung"].apply(normalize_bool) if has_samsung else pd.Series([False] * len(df))
+        skhynix_flags = df["is_skhynix"].apply(normalize_bool) if has_skhynix else pd.Series([False] * len(df))
+        
+        # company 컬럼 생성
+        def determine_company(samsung, skhynix):
+            if samsung and skhynix:
+                return "both"
+            elif samsung:
+                return "Samsung Electronics"
+            elif skhynix:
+                return "SK Hynix"
+            else:
+                return None
+        
+        df["company"] = [determine_company(s, h) for s, h in zip(samsung_flags, skhynix_flags)]
+        return df
+
     if uploaded_sentiment is not None:
         try:
             sentiment_df = pd.read_csv(uploaded_sentiment)
+            
+            # inp_date를 date로 변환 (없으면 그대로 유지)
+            if "inp_date" in sentiment_df.columns and "date" not in sentiment_df.columns:
+                sentiment_df["date"] = sentiment_df["inp_date"]
+            elif "inp_date" in sentiment_df.columns and "date" in sentiment_df.columns:
+                # 둘 다 있으면 date 우선 사용 (또는 inp_date로 덮어쓰기)
+                sentiment_df["date"] = sentiment_df["inp_date"]
+            
+            # company 컬럼이 없으면 is_samsung/is_skhynix로 생성
+            sentiment_df = create_company_column_from_flags(sentiment_df)
+                
         except Exception as exc:
             st.error(f"감성 CSV를 읽는 중 오류가 발생했습니다: {exc}")
 
