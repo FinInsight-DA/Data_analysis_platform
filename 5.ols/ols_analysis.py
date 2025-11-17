@@ -443,8 +443,13 @@ def resample_sentiment_market(
 
 
 def merge_datasets(sentiment_matrix: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    감성 데이터와 시장 데이터 병합
+    노트북 방식: left join을 사용하여 감성 데이터의 모든 날짜 유지
+    """
     sentiment_reset = sentiment_matrix.reset_index()
-    merged = pd.merge(sentiment_reset, market_df, on="date", how="inner")
+    # 노트북 방식: left join 사용 (감성 데이터의 모든 날짜 유지)
+    merged = pd.merge(sentiment_reset, market_df, on="date", how="left")
     merged = merged.sort_values("date")
     return merged
 
@@ -480,6 +485,11 @@ def fit_ols_model(
     X = merged[feature_cols].replace([np.inf, -np.inf], np.nan)
     X = X.fillna(0.0).astype(float)
     y = merged[target_col].astype(float)
+    
+    # left join으로 인한 NaN 제거 (종속변수가 없는 행 제거)
+    valid_mask = ~y.isna()
+    X = X[valid_mask]
+    y = y[valid_mask]
 
     if X.empty or y.empty:
         raise ValueError("회귀에 사용할 데이터가 충분하지 않습니다.")
@@ -720,39 +730,98 @@ def run_topic_regression_from_frames(
     )
     sentiment_matrix = build_topic_sentiment_matrix(sentiment_scores)
     sentiment_matrix.index = pd.to_datetime(sentiment_matrix.index)
+    print(f"[DEBUG] 재샘플링 전 감성 매트릭스 행 수: {len(sentiment_matrix)}")
+    print(f"[DEBUG] 감성 매트릭스 컬럼: {list(sentiment_matrix.columns)}")
 
     market_prepared = prepare_market_dataframe(market_df.copy(), date_format=None)
+    print(f"[DEBUG] 재샘플링 전 시장 데이터 행 수: {len(market_prepared)}")
 
-    if frequency:
-        use_topic_method = True  # 노트북 방식 사용
-        sentiment_matrix, market_prepared = resample_sentiment_market(
-            sentiment_matrix,
-            market_prepared,
-            frequency=frequency,
-            use_topic_method=use_topic_method,
-        )
-
-    lagged_columns: list[str] = []
-    if lag_periods:
-        sentiment_matrix, lagged_columns = add_lag_features(
-            sentiment_matrix,
-            target_columns=lag_target_columns,
-            lag_periods=lag_periods,
-        )
-
+    # 노트북 방식: 일별 데이터를 먼저 병합한 후 재샘플링
     sentiment_for_merge = sentiment_matrix.copy()
     sentiment_for_merge.index = sentiment_for_merge.index.strftime("%Y-%m-%d")
     market_prepared["date"] = market_prepared["date"].dt.strftime("%Y-%m-%d")
 
-    merged = merge_datasets(sentiment_for_merge, market_prepared)
-    merged["date"] = pd.to_datetime(merged["date"])
-    merged = filter_period(merged, start, end)
+    # 일별 데이터 병합 (노트북 방식: left join)
+    merged_daily = merge_datasets(sentiment_for_merge, market_prepared)
+    merged_daily["date"] = pd.to_datetime(merged_daily["date"])
+    print(f"[DEBUG] 병합 후 일별 데이터 행 수: {len(merged_daily)}")
+    topic_cols_daily = [col for col in merged_daily.columns if col.startswith("Topic ")]
+    print(f"[DEBUG] 병합 후 Topic 컬럼 수: {len(topic_cols_daily)}, 컬럼명: {topic_cols_daily[:5] if topic_cols_daily else '없음'}")
+    
+    # 기간 필터링 (재샘플링 전에 필터링)
+    merged_daily = filter_period(merged_daily, start, end)
+    print(f"[DEBUG] 필터링 후 일별 데이터 행 수: {len(merged_daily)}")
+    if len(merged_daily) > 0:
+        print(f"[DEBUG] 필터링 후 날짜 범위: {merged_daily['date'].min()} ~ {merged_daily['date'].max()}")
+
+    if frequency:
+        # 노트북 방식: 병합된 일별 데이터를 주간으로 재샘플링
+        use_topic_method = True
+        merged_daily_indexed = merged_daily.set_index("date")
+        
+        # Topic 컬럼은 평균, usdkrw와 close는 변동률 계산
+        topic_cols = [col for col in merged_daily_indexed.columns if col.startswith("Topic ")]
+        print(f"[DEBUG] 재샘플링 전 Topic 컬럼 수: {len(topic_cols)}, 컬럼명: {topic_cols[:5] if topic_cols else '없음'}")
+        
+        if not topic_cols:
+            raise ValueError("재샘플링할 Topic 컬럼이 없습니다. 감성 데이터에 토픽 정보가 있는지 확인하세요.")
+        
+        aggregation_methods = {col: 'mean' for col in topic_cols}
+        
+        merged_resampled = merged_daily_indexed[topic_cols].resample(frequency).agg(aggregation_methods)
+        print(f"[DEBUG] 재샘플링 후 Topic 컬럼 수: {len(merged_resampled.columns)}")
+        
+        # usdkrw와 close는 변동률 계산
+        if "usdkrw" in merged_daily_indexed.columns:
+            merged_resampled["usdkrw"] = merged_daily_indexed["usdkrw"].resample(frequency).apply(
+                lambda x: (x.dropna().iloc[-1] - x.dropna().iloc[0]) / x.dropna().iloc[0] 
+                if len(x.dropna()) > 1 and x.dropna().iloc[0] != 0 else 0
+            )
+        elif "환율증감률" in merged_daily_indexed.columns:
+            merged_resampled["환율증감률"] = merged_daily_indexed["환율증감률"].resample(frequency).apply(
+                lambda x: (x.dropna().iloc[-1] - x.dropna().iloc[0]) / x.dropna().iloc[0] 
+                if len(x.dropna()) > 1 and x.dropna().iloc[0] != 0 else 0
+            )
+        
+        # close 또는 daily_return 변동률 계산
+        if "close" in merged_daily_indexed.columns:
+            merged_resampled["close"] = merged_daily_indexed["close"].resample(frequency).apply(
+                lambda x: (x.dropna().iloc[-1] - x.dropna().iloc[0]) / x.dropna().iloc[0] 
+                if len(x.dropna()) > 1 and x.dropna().iloc[0] != 0 else 0
+            )
+        elif "daily_return" in merged_daily_indexed.columns:
+            merged_resampled["daily_return"] = merged_daily_indexed["daily_return"].resample(frequency).apply(
+                lambda x: (x.dropna().iloc[-1] - x.dropna().iloc[0]) / x.dropna().iloc[0] 
+                if len(x.dropna()) > 1 and x.dropna().iloc[0] != 0 else 0
+            )
+        
+        merged_resampled = merged_resampled.fillna(0)
+        merged = merged_resampled.reset_index()
+        print(f"[DEBUG] 재샘플링 후 주간 데이터 행 수: {len(merged)}")
+        if len(merged) > 0:
+            print(f"[DEBUG] 재샘플링 후 날짜 범위: {merged['date'].min()} ~ {merged['date'].max()}")
+    else:
+        # 재샘플링 없음: 일별 데이터 그대로 사용
+        merged = merged_daily
+        print(f"[DEBUG] 재샘플링 없음, 일별 데이터 행 수: {len(merged)}")
+
+    lagged_columns: list[str] = []
+    if lag_periods:
+        merged_indexed = merged.set_index("date")
+        merged_indexed, lagged_columns = add_lag_features(
+            merged_indexed,
+            target_columns=lag_target_columns,
+            lag_periods=lag_periods,
+        )
+        merged = merged_indexed.reset_index()
 
     if merged.empty:
         raise ValueError("조건에 맞는 병합 데이터가 없습니다. 기간 또는 입력 데이터를 확인하세요.")
 
     # 실제 데이터에 있는 Topic 컬럼만 사용 (노트북 방식)
     topic_cols = [col for col in merged.columns if col.startswith("Topic ")]
+    print(f"[DEBUG] 최종 데이터 Topic 컬럼 수: {len(topic_cols)}, 컬럼명: {topic_cols[:5] if topic_cols else '없음'}")
+    print(f"[DEBUG] 최종 데이터 전체 컬럼: {list(merged.columns)[:10]}")
     
     if feature_columns:
         feature_cols = [col for col in feature_columns if col in merged.columns]
@@ -762,11 +831,37 @@ def run_topic_regression_from_frames(
             feature_cols.append("usdkrw")
         elif "환율증감률" in merged.columns:
             feature_cols.append("환율증감률")
-
+    
     if lagged_columns:
         existing_cols = [col for col in lagged_columns if col in merged.columns]
         feature_cols.extend(existing_cols)
-
+    
+    # 과적합 방지: 표본 수가 변수 수보다 적으면 경고 및 자동 제한
+    n_samples = len(merged)
+    n_features = len(feature_cols)
+    print(f"[DEBUG] 최종 병합 데이터 행 수: {n_samples}, 변수 수: {n_features}")
+    min_samples_needed = n_features + 1  # 최소 표본 수 = 변수 수 + 1
+    
+    if n_samples < min_samples_needed:
+        # 토픽 수를 자동으로 제한 (표본 수 - 환율 - 상수항 - 여유분)
+        max_topics = max(1, n_samples - 3)  # 최소 1개 토픽은 유지
+        
+        # Topic 컬럼만 필터링 (환율 등은 유지)
+        topic_cols_filtered = [col for col in feature_cols if col.startswith("Topic ")]
+        non_topic_cols = [col for col in feature_cols if not col.startswith("Topic ")]
+        
+        if len(topic_cols_filtered) > max_topics:
+            # Topic 1부터 순서대로 선택
+            topic_cols_filtered = sorted(topic_cols_filtered)[:max_topics]
+            feature_cols = topic_cols_filtered + non_topic_cols
+            
+            import warnings
+            warnings.warn(
+                f"⚠️ 과적합 방지: 표본 수({n_samples}개)가 변수 수({n_features}개)보다 적어 "
+                f"토픽 수를 {len(topic_cols_filtered)}개로 제한했습니다. "
+                f"더 정확한 분석을 위해 재샘플링 빈도를 조정하거나 기간을 늘려주세요."
+            )
+    
     model = fit_ols_model(merged, feature_subset=feature_cols)
     coefficients = summarize_coefficients(model)
     diagnostics = extract_model_metrics(model)
