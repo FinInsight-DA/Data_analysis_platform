@@ -102,7 +102,6 @@ target = PAGES[choice]
 # 공통 안내(최초 진입시만)
 with st.sidebar.expander("ℹ️ 사용 가이드", expanded=False):
     st.write(
-
         "- 환경 패키지는 폴더별 `requirements*.txt` 참고.\n"
     )
 
