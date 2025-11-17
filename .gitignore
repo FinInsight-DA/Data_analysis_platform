@@ -18,3 +18,4 @@ temp_model/
 # HuggingFace / Trainer outputs
 **/checkpoint-*/
 **/runs/
+*.csv

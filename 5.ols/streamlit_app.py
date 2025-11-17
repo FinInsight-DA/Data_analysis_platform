@@ -17,6 +17,18 @@ if str(_current_dir) not in sys.path:
 from crawl_market_data import crawl_market_data, resolve_stock_code
 from ols_analysis import run_regression_scenarios_from_frames
 
+# 폰트 설정
+def get_korean_font_path():
+    """시스템에서 한글 폰트를 찾아서 경로를 반환"""
+    candidates = [
+        "C:/Windows/Fonts/malgun.ttf",                  # 윈도우 맑은고딕
+        "C:/Windows/Fonts/malgunbd.ttf",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",   # macOS
+    ]
+    for p in candidates:
+        if Path(p).exists():
+            return p
+    return None
 
 def main():
     # --- 페이지 타이틀 ---
@@ -830,106 +842,123 @@ def main():
                 )
                 st.plotly_chart(fig_comparison, use_container_width=True)
             
-            # ==============================
-            # 11. 워드 클라우드 시각화
-            # ==============================
-            if sentiment_df is not None:
-                st.markdown("---")
-                st.markdown("## 워드 클라우드 시각화")
-                
-                # 키워드 데이터 추출 시도
-                keyword_col = None
-                if "extracted_keywords" in sentiment_df.columns:
-                    keyword_col = "extracted_keywords"
-                elif "aspect_term" in sentiment_df.columns:
-                    keyword_col = "aspect_term"
-                
-                if keyword_col:
-                    # 감성별 키워드 추출
-                    sentiment_col = "sentiment" if "sentiment" in sentiment_df.columns else "predicted_sentiment"
-                    
-                    if sentiment_col in sentiment_df.columns:
-                        # 긍정 키워드
-                        positive_df = sentiment_df[
-                            sentiment_df[sentiment_col].astype(str).str.lower().isin(["positive", "pos", "1", "1.0"])
-                        ]
-                        # 부정 키워드
-                        negative_df = sentiment_df[
-                            sentiment_df[sentiment_col].astype(str).str.lower().isin(["negative", "neg", "-1", "-1.0"])
-                        ]
-                        
-                        def extract_keywords_freq(df, col_name):
-                            """키워드 빈도 추출"""
-                            all_keywords = []
-                            for keywords_str in df[col_name].dropna():
-                                if isinstance(keywords_str, str):
-                                    # 리스트 형태 문자열 파싱
+                # ==============================
+                # 11. 워드 클라우드 시각화
+                # ==============================
+                if sentiment_df is not None:
+                    st.markdown("---")
+                    st.markdown("## 워드 클라우드 시각화")
+
+                    # 한글 폰트 경로 가져오기
+                    font_path = get_korean_font_path()
+                    if font_path is None:
+                        st.warning(
+                            "한글 폰트를 찾지 못했습니다. 워드클라우드에서 한글이 깨질 수 있어요.\n"
+                            "Windows라면 C:/Windows/Fonts/malgun.ttf 가 있는지 확인해주세요."
+                        )
+
+                    # 키워드 데이터 추출 시도
+                    keyword_col = None
+                    if "extracted_keywords" in sentiment_df.columns:
+                        keyword_col = "extracted_keywords"
+                    elif "aspect_term" in sentiment_df.columns:
+                        keyword_col = "aspect_term"
+
+                    if keyword_col:
+                        # 감성별 키워드 추출
+                        sentiment_col = "sentiment" if "sentiment" in sentiment_df.columns else "predicted_sentiment"
+
+                        if sentiment_col in sentiment_df.columns:
+                            # 긍정 키워드
+                            positive_df = sentiment_df[
+                                sentiment_df[sentiment_col].astype(str).str.lower().isin(["positive", "pos", "1", "1.0"])
+                            ]
+                            # 부정 키워드
+                            negative_df = sentiment_df[
+                                sentiment_df[sentiment_col].astype(str).str.lower().isin(["negative", "neg", "-1", "-1.0"])
+                            ]
+
+                            def extract_keywords_freq(df, col_name):
+                                """키워드 빈도 추출"""
+                                all_keywords = []
+                                for keywords_str in df[col_name].dropna():
+                                    if isinstance(keywords_str, str):
+                                        # 리스트 형태 문자열 파싱
+                                        try:
+                                            import ast
+                                            keywords = ast.literal_eval(keywords_str)
+                                            if isinstance(keywords, list):
+                                                all_keywords.extend(keywords)
+                                        except Exception:
+                                            # 쉼표로 구분된 문자열
+                                            keywords = [
+                                                k.strip()
+                                                for k in keywords_str.replace("[", "").replace("]", "").replace("'", "").split(",")
+                                            ]
+                                            all_keywords.extend([k for k in keywords if k])
+
+                                from collections import Counter
+                                return dict(Counter(all_keywords))
+
+                            positive_freq = extract_keywords_freq(positive_df, keyword_col)
+                            negative_freq = extract_keywords_freq(negative_df, keyword_col)
+
+                            col1, col2 = st.columns(2)
+
+                            # ------------------ 긍정 워드클라우드 ------------------
+                            with col1:
+                                if positive_freq:
+                                    st.markdown("### 긍정 키워드 워드 클라우드")
                                     try:
-                                        import ast
-                                        keywords = ast.literal_eval(keywords_str)
-                                        if isinstance(keywords, list):
-                                            all_keywords.extend(keywords)
-                                    except:
-                                        # 쉼표로 구분된 문자열
-                                        keywords = [k.strip() for k in keywords_str.replace("[", "").replace("]", "").replace("'", "").split(",")]
-                                        all_keywords.extend([k for k in keywords if k])
-                            
-                            # 빈도 계산
-                            from collections import Counter
-                            return dict(Counter(all_keywords))
-                        
-                        positive_freq = extract_keywords_freq(positive_df, keyword_col)
-                        negative_freq = extract_keywords_freq(negative_df, keyword_col)
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            if positive_freq:
-                                st.markdown("### 긍정 키워드 워드 클라우드")
-                                try:
-                                    wordcloud_pos = WordCloud(
-                                        width=800, height=400,
-                                        background_color='white',
-                                        colormap='Greens',
-                                        max_words=100
-                                    ).generate_from_frequencies(positive_freq)
-                                    
-                                    fig_wc_pos, ax_pos = plt.subplots(figsize=(10, 5))
-                                    ax_pos.imshow(wordcloud_pos, interpolation='bilinear')
-                                    ax_pos.axis("off")
-                                    ax_pos.set_title("Positive Keywords", fontsize=16, pad=20)
-                                    st.pyplot(fig_wc_pos)
-                                    plt.close(fig_wc_pos)
-                                except Exception as e:
-                                    st.warning(f"긍정 워드 클라우드 생성 실패: {e}")
-                            else:
-                                st.info("긍정 키워드 데이터가 없습니다.")
-                        
-                        with col2:
-                            if negative_freq:
-                                st.markdown("### 부정 키워드 워드 클라우드")
-                                try:
-                                    wordcloud_neg = WordCloud(
-                                        width=800, height=400,
-                                        background_color='white',
-                                        colormap='Reds',
-                                        max_words=100
-                                    ).generate_from_frequencies(negative_freq)
-                                    
-                                    fig_wc_neg, ax_neg = plt.subplots(figsize=(10, 5))
-                                    ax_neg.imshow(wordcloud_neg, interpolation='bilinear')
-                                    ax_neg.axis("off")
-                                    ax_neg.set_title("Negative Keywords", fontsize=16, pad=20)
-                                    st.pyplot(fig_wc_neg)
-                                    plt.close(fig_wc_neg)
-                                except Exception as e:
-                                    st.warning(f"부정 워드 클라우드 생성 실패: {e}")
-                            else:
-                                st.info("부정 키워드 데이터가 없습니다.")
+                                        wordcloud_pos = WordCloud(
+                                            font_path=font_path,          # ✅ 한글 폰트 지정
+                                            width=800,
+                                            height=400,
+                                            background_color="white",
+                                            colormap="Greens",
+                                            max_words=100,
+                                        ).generate_from_frequencies(positive_freq)
+
+                                        fig_wc_pos, ax_pos = plt.subplots(figsize=(10, 5))
+                                        ax_pos.imshow(wordcloud_pos, interpolation="bilinear")
+                                        ax_pos.axis("off")
+                                        ax_pos.set_title("Positive Keywords", fontsize=16, pad=20)
+                                        st.pyplot(fig_wc_pos)
+                                        plt.close(fig_wc_pos)
+                                    except Exception as e:
+                                        st.warning(f"긍정 워드 클라우드 생성 실패: {e}")
+                                else:
+                                    st.info("긍정 키워드 데이터가 없습니다.")
+
+                            # ------------------ 부정 워드클라우드 ------------------
+                            with col2:
+                                if negative_freq:
+                                    st.markdown("### 부정 키워드 워드 클라우드")
+                                    try:
+                                        wordcloud_neg = WordCloud(
+                                            font_path=font_path,          # ✅ 한글 폰트 지정
+                                            width=800,
+                                            height=400,
+                                            background_color="white",
+                                            colormap="Reds",
+                                            max_words=100,
+                                        ).generate_from_frequencies(negative_freq)
+
+                                        fig_wc_neg, ax_neg = plt.subplots(figsize=(10, 5))
+                                        ax_neg.imshow(wordcloud_neg, interpolation="bilinear")
+                                        ax_neg.axis("off")
+                                        ax_neg.set_title("Negative Keywords", fontsize=16, pad=20)
+                                        st.pyplot(fig_wc_neg)
+                                        plt.close(fig_wc_neg)
+                                    except Exception as e:
+                                        st.warning(f"부정 워드 클라우드 생성 실패: {e}")
+                                else:
+                                    st.info("부정 키워드 데이터가 없습니다.")
+                        else:
+                            st.info("감성 컬럼을 찾을 수 없어 워드 클라우드를 생성할 수 없습니다.")
                     else:
-                        st.info("감성 컬럼을 찾을 수 없어 워드 클라우드를 생성할 수 없습니다.")
-                else:
-                    st.info("키워드 컬럼(`extracted_keywords` 또는 `aspect_term`)이 없어 워드 클라우드를 생성할 수 없습니다.")
+                        st.info("키워드 컬럼(`extracted_keywords` 또는 `aspect_term`)이 없어 워드 클라우드를 생성할 수 없습니다.")
+
 
     # ==============================
     # 12. 종목 코드 확인 버튼 로직

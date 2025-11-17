@@ -8,6 +8,7 @@ drive.mount('/content/drive')
 
 import json
 import pandas as pd
+import numpy as np
 from typing import Tuple
 from io import TextIOWrapper
 
@@ -133,6 +134,79 @@ def map_to_standard_labels(df):
     return df
 
 
+# 기본 회사 설정
+DEFAULT_COMPANY_CONFIG = {
+    'Samsung Electronics': ['삼성전자', '삼성', 'samsung'],
+    'SK Hynix': ['하이닉스', 'sk하이닉스', 'sk hynix']
+}
+
+def check_company_mentions(sent: str, company_config: dict = None) -> dict:
+    """
+    문장에서 설정된 회사명 언급 여부 확인
+    
+    Args:
+        sent: 입력 문장 문자열
+        company_config: 회사별 키워드 딕셔너리 (None이면 기본 설정 사용)
+            예: {
+                'Samsung Electronics': ['삼성전자', '삼성', 'samsung'],
+                'SK Hynix': ['하이닉스', 'sk하이닉스', 'sk hynix']
+            }
+        
+    Returns:
+        회사명을 키로 하는 불리언 딕셔너리
+        예: {'Samsung Electronics': True, 'SK Hynix': False, ...}
+    """
+    if company_config is None:
+        company_config = DEFAULT_COMPANY_CONFIG
+    
+    if pd.isna(sent) or not sent:
+        return {company: False for company in company_config.keys()}
+    
+    sent_lower = str(sent).lower()
+    result = {}
+    
+    for company_name, keywords in company_config.items():
+        result[company_name] = any(keyword.lower() in sent_lower for keyword in keywords)
+    
+    return result
+
+
+def add_company_columns(df, company_config: dict = None):
+    """
+    DataFrame에 company 컬럼 추가
+    - 한 회사만 언급: 해당 회사명
+    - 두 회사 이상 언급: "both"
+    - 언급 없음: None
+    
+    Args:
+        df: 입력 DataFrame (sentence 컬럼 필요)
+        company_config: 회사별 키워드 딕셔너리 (None이면 기본 설정 사용)
+        
+    Returns:
+        company 컬럼이 추가된 DataFrame
+    """
+    if company_config is None:
+        company_config = DEFAULT_COMPANY_CONFIG
+    
+    # 회사 언급 확인
+    company_checks = df['sentence'].apply(lambda x: check_company_mentions(x, company_config))
+    
+    # company 컬럼 생성 (두 회사 모두 언급된 경우 "both"로 설정)
+    def determine_company(checks_dict):
+        mentioned_companies = [company for company, is_mentioned in checks_dict.items() if is_mentioned]
+        if len(mentioned_companies) == 0:
+            return None
+        elif len(mentioned_companies) == 1:
+            return mentioned_companies[0]
+        else:
+            # 두 회사 이상 언급된 경우
+            return "both"
+    
+    df['company'] = company_checks.apply(determine_company)
+    
+    return df
+
+
 # ============================================================================
 # 메인 실행
 # ============================================================================
@@ -152,6 +226,9 @@ def main():
 
     # sentence 생성
     df['sentence'] = df['title'].fillna('') + ' ' + df['content'].fillna('')
+
+    # company 컬럼 추가 (두 회사 모두 언급된 경우 "both"로 설정)
+    df = add_company_columns(df)
 
     # 라벨링 실행
     results = df['sentence'].apply(lambda x: detect_label_in_text(x, TERM_DB, label_priority, default_label, min_matches=1))
