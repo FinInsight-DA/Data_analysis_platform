@@ -1,6 +1,6 @@
 [server]
-maxUploadSize = 1000
-maxMessageSize = 1000
+maxUploadSize = 2000
+maxMessageSize = 2000
 connectionTimeout = 1800
 
 [runner]
