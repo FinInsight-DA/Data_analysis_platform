@@ -8,6 +8,7 @@ drive.mount('/content/drive')
 
 import json
 import pandas as pd
+import numpy as np
 from typing import Tuple
 from io import TextIOWrapper
 
@@ -133,6 +134,77 @@ def map_to_standard_labels(df):
     return df
 
 
+# 기본 회사 설정
+DEFAULT_COMPANY_CONFIG = {
+    'Samsung Electronics': ['삼성전자', '삼성', 'samsung'],
+    'SK Hynix': ['하이닉스', 'sk하이닉스', 'sk hynix']
+}
+
+def check_company_mentions(sent: str, company_config: dict = None) -> dict:
+    """
+    문장에서 설정된 회사명 언급 여부 확인
+    
+    Args:
+        sent: 입력 문장 문자열
+        company_config: 회사별 키워드 딕셔너리 (None이면 기본 설정 사용)
+            예: {
+                'Samsung Electronics': ['삼성전자', '삼성', 'samsung'],
+                'SK Hynix': ['하이닉스', 'sk하이닉스', 'sk hynix']
+            }
+        
+    Returns:
+        회사명을 키로 하는 불리언 딕셔너리
+        예: {'Samsung Electronics': True, 'SK Hynix': False, ...}
+    """
+    if company_config is None:
+        company_config = DEFAULT_COMPANY_CONFIG
+    
+    if pd.isna(sent) or not sent:
+        return {company: False for company in company_config.keys()}
+    
+    sent_lower = str(sent).lower()
+    result = {}
+    
+    for company_name, keywords in company_config.items():
+        result[company_name] = any(keyword.lower() in sent_lower for keyword in keywords)
+    
+    return result
+
+
+def add_company_columns(df, company_config: dict = None):
+    """
+    DataFrame에 회사별 불리언 컬럼 및 company 컬럼 추가
+    
+    Args:
+        df: 입력 DataFrame (sentence 컬럼 필요)
+        company_config: 회사별 키워드 딕셔너리 (None이면 기본 설정 사용)
+        
+    Returns:
+        company 컬럼이 추가된 DataFrame
+    """
+    if company_config is None:
+        company_config = DEFAULT_COMPANY_CONFIG
+    
+    # 각 회사별 불리언 컬럼 생성
+    company_checks = df['sentence'].apply(lambda x: check_company_mentions(x, company_config))
+    
+    for company_name in company_config.keys():
+        # 회사명에서 공백 제거하여 컬럼명으로 사용 (예: 'SK Hynix' -> 'is_sk_hynix')
+        col_name = f"is_{company_name.lower().replace(' ', '_')}"
+        df[col_name] = company_checks.apply(lambda x: x.get(company_name, False))
+    
+    # company 컬럼 생성 (여러 회사 중 하나만 선택)
+    conditions = [df[f"is_{company_name.lower().replace(' ', '_')}"] == True 
+                  for company_name in company_config.keys()]
+    df['company'] = np.select(
+        conditions,
+        list(company_config.keys()),
+        default=None
+    )
+    
+    return df
+
+
 # ============================================================================
 # 메인 실행
 # ============================================================================
@@ -152,6 +224,9 @@ def main():
 
     # sentence 생성
     df['sentence'] = df['title'].fillna('') + ' ' + df['content'].fillna('')
+
+    # company 컬럼 추가 (is_samsung, is_skhynix 포함)
+    df = add_company_columns(df)
 
     # 라벨링 실행
     results = df['sentence'].apply(lambda x: detect_label_in_text(x, TERM_DB, label_priority, default_label, min_matches=1))
@@ -183,7 +258,7 @@ def main():
     print(f"Unknown 제외: {df_original_len:,}개 -> {len(df):,}개\n")
 
     # 컬럼 순서 정리
-    output_cols = ['title', 'content', 'sentence', 'company', 'inp_date',
+    output_cols = ['title', 'content', 'sentence', 'company', 'is_samsung', 'is_skhynix', 'inp_date',
                    'label', 'HV_type', 'match_count',
                    'aspect_category', 'aspect_term']
     output_cols = [col for col in output_cols if col in df.columns]

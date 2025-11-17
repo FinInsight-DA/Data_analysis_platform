@@ -5,6 +5,7 @@ HBM 프로젝트 - 데이터 라벨링 자동화 Streamlit 앱 (로컬 환경용
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import json
 import plotly.express as px
 import plotly.graph_objects as go
@@ -123,10 +124,62 @@ def detect_label_in_text(text: str, TERM_DB: dict, label_priority: list,
 
     return (default_label, '공통', 'Unknown', 0)
 
-def process_labeling(df, TERM_DB, config):
+def check_company_mentions(sent: str, company_config: dict) -> dict:
+    """
+    문장에서 설정된 회사명 언급 여부 확인
+    
+    Args:
+        sent: 입력 문장 문자열
+        company_config: 회사별 키워드 딕셔너리
+            예: {
+                'Samsung Electronics': ['삼성전자', '삼성', 'samsung'],
+                'SK Hynix': ['하이닉스', 'sk하이닉스', 'sk hynix']
+            }
+        
+    Returns:
+        회사명을 키로 하는 불리언 딕셔너리
+        예: {'Samsung Electronics': True, 'SK Hynix': False, ...}
+    """
+    if pd.isna(sent) or not sent:
+        return {company: False for company in company_config.keys()}
+    
+    sent_lower = str(sent).lower()
+    result = {}
+    
+    for company_name, keywords in company_config.items():
+        result[company_name] = any(keyword.lower() in sent_lower for keyword in keywords)
+    
+    return result
+
+def process_labeling(df, TERM_DB, config, company_config: dict = None):
     """라벨링 처리"""
     # sentence 생성
     df['sentence'] = df['title'].fillna('') + ' ' + df['content'].fillna('')
+    
+    # company 컬럼 추가
+    if company_config is None:
+        # 기본 설정: 삼성전자, SK하이닉스
+        company_config = {
+            'Samsung Electronics': ['삼성전자', '삼성', 'samsung'],
+            'SK Hynix': ['하이닉스', 'sk하이닉스', 'sk hynix']
+        }
+    
+    # 각 회사별 불리언 컬럼 생성
+    company_checks = df['sentence'].apply(lambda x: check_company_mentions(x, company_config))
+    
+    for company_name in company_config.keys():
+        # 회사명에서 공백 제거하여 컬럼명으로 사용 (예: 'SK Hynix' -> 'is_sk_hynix')
+        col_name = f"is_{company_name.lower().replace(' ', '_')}"
+        df[col_name] = company_checks.apply(lambda x: x.get(company_name, False))
+    
+    # company 컬럼 생성 (여러 회사 중 하나만 선택)
+    conditions = [df[f"is_{company_name.lower().replace(' ', '_')}"] == True 
+                  for company_name in company_config.keys()]
+    df['company'] = np.select(
+        conditions,
+        list(company_config.keys()),
+        default=None
+    )
     
     # 라벨링 실행
     results = df['sentence'].apply(
@@ -435,17 +488,43 @@ def main():
         st.info("⬆️ CSV 파일과 Term DB JSON 파일을 업로드해주세요.")
         return
     
+    # 파일 업로드 완료 메시지
+    st.success("✅ 파일 업로드 완료! 데이터를 로드하는 중...")
+    
     # 데이터 로드
     try:
         df = pd.read_csv(uploaded_csv)
-        # 깔끔한 회색 배경
+        
+        # 필수 컬럼 확인
+        required_cols = ['title', 'content']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            st.error(f"❌ 필수 컬럼이 없습니다: {', '.join(missing_cols)}")
+            st.info("💡 CSV 파일에 'title'과 'content' 컬럼이 있는지 확인해주세요.")
+            return
+        
+        # 성공 메시지
         st.markdown(f"""
-        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+        <div style="background-color: #d4edda; border: 1px solid #c3e6cb; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
             ✅ <strong>데이터 로드 완료:</strong> {len(df):,}개 문서
         </div>
         """, unsafe_allow_html=True)
+        
+        # 데이터 미리보기
+        with st.expander("📊 데이터 미리보기 (처음 5개 행)", expanded=False):
+            st.dataframe(df[required_cols].head(5), use_container_width=True)
+            st.caption(f"전체 데이터: {len(df):,}개 행, {len(df.columns)}개 컬럼")
+            
+    except pd.errors.EmptyDataError:
+        st.error("❌ CSV 파일이 비어있습니다.")
+        return
+    except pd.errors.ParserError as e:
+        st.error(f"❌ CSV 파일 파싱 오류: {e}")
+        st.info("💡 CSV 파일 형식이 올바른지 확인해주세요.")
+        return
     except Exception as e:
         st.error(f"❌ CSV 파일 로드 실패: {e}")
+        st.exception(e)
         return
     
     try:
@@ -457,17 +536,35 @@ def main():
             uploaded_term_db.seek(0)
         
         TERM_DB = load_term_db_from_json(term_db_content)
-        # 깔끔한 회색 배경
+        
+        if not TERM_DB:
+            st.warning("⚠️ Term DB가 비어있습니다. JSON 파일 형식을 확인해주세요.")
+            return
+        
+        # 성공 메시지
         st.markdown(f"""
-        <div style="background-color: #F0F2F6; padding: 1rem; border-radius: 0.5rem;">
+        <div style="background-color: #d4edda; border: 1px solid #c3e6cb; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
             ✅ <strong>Term DB 로드 완료:</strong> {len(TERM_DB)}개 라벨
         </div>
         """, unsafe_allow_html=True)
+        
+        # Term DB 미리보기
+        with st.expander("📋 Term DB 미리보기", expanded=False):
+            for label, terms in TERM_DB.items():
+                st.write(f"**{label}**: {len(terms)}개 키워드")
+                st.caption(f"키워드 예시: {', '.join(list(terms)[:5])}...")
+        
+    except json.JSONDecodeError as e:
+        st.error(f"❌ JSON 파일 형식 오류: {e}")
+        st.info("💡 JSON 파일 형식이 올바른지 확인해주세요.")
+        return
     except Exception as e:
         st.error(f"❌ Term DB 파일 로드 실패: {e}")
+        st.exception(e)
         return
     
     st.markdown("---")
+    st.markdown("### 다음 단계: 파라미터 설정 및 라벨링 실행")
     
     # ============================================================================
     # 2. 파라미터 설정 (분석가용)
@@ -532,6 +629,105 @@ def main():
             help="결과에 포함할 최소 매칭 수 (라벨링 후 필터링)"
         )
     
+    # ============================================================================
+    # 회사 분류 설정
+    # ============================================================================
+    st.markdown("---")
+    st.markdown('<div class="sub-header">🏢 회사 분류 설정</div>', unsafe_allow_html=True)
+    
+    # 기본 회사 설정
+    default_company_config = {
+        'Samsung Electronics': ['삼성전자', '삼성', 'samsung'],
+        'SK Hynix': ['하이닉스', 'sk하이닉스', 'sk hynix']
+    }
+    
+    # 세션 상태에 회사 설정 저장
+    if 'company_config' not in st.session_state:
+        st.session_state['company_config'] = default_company_config.copy()
+    
+    with st.expander("📝 회사명 및 키워드 설정", expanded=False):
+        st.info("💡 기본 설정: 삼성전자, SK하이닉스. 필요시 회사 추가/수정 가능합니다.")
+        
+        # 회사 추가/수정 UI
+        company_config_editor = {}
+        
+        # 기존 회사들 표시 및 수정
+        for idx, (company_name, keywords) in enumerate(st.session_state['company_config'].items()):
+            st.markdown(f"**회사 {idx + 1}**")
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                new_company_name = st.text_input(
+                    "회사명",
+                    value=company_name,
+                    key=f"company_name_{idx}",
+                    help="회사명을 입력하세요 (예: Samsung Electronics)"
+                )
+            
+            with col2:
+                if st.button("🗑️ 삭제", key=f"delete_company_{idx}", use_container_width=True):
+                    # 삭제 처리
+                    temp_config = st.session_state['company_config'].copy()
+                    del temp_config[company_name]
+                    st.session_state['company_config'] = temp_config
+                    st.rerun()
+            
+            keywords_str = st.text_input(
+                "키워드 (쉼표로 구분)",
+                value=", ".join(keywords),
+                key=f"keywords_{idx}",
+                help="이 회사를 식별할 키워드를 쉼표로 구분하여 입력하세요"
+            )
+            
+            # 키워드 파싱
+            keywords_list = [k.strip() for k in keywords_str.split(',') if k.strip()]
+            if new_company_name and keywords_list:
+                company_config_editor[new_company_name] = keywords_list
+        
+        # 새 회사 추가
+        st.markdown("---")
+        st.markdown("**➕ 새 회사 추가**")
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            new_company_name_input = st.text_input(
+                "새 회사명",
+                value="",
+                key="new_company_name",
+                placeholder="예: Apple, TSMC 등"
+            )
+        
+        with col2:
+            new_company_keywords_input = st.text_input(
+                "키워드 (쉼표로 구분)",
+                value="",
+                key="new_company_keywords",
+                placeholder="예: 애플, apple, iphone"
+            )
+        
+        if st.button("➕ 회사 추가", key="add_company", use_container_width=True):
+            if new_company_name_input and new_company_keywords_input:
+                keywords_list = [k.strip() for k in new_company_keywords_input.split(',') if k.strip()]
+                if keywords_list:
+                    st.session_state['company_config'][new_company_name_input] = keywords_list
+                    st.rerun()
+            else:
+                st.warning("회사명과 키워드를 모두 입력해주세요.")
+        
+        # 기본값으로 초기화 버튼
+        if st.button("🔄 기본값으로 초기화", key="reset_company_config", use_container_width=True):
+            st.session_state['company_config'] = default_company_config.copy()
+            st.rerun()
+        
+        # 최종 설정 표시
+        if company_config_editor:
+            st.session_state['company_config'] = company_config_editor
+    
+    # 회사 설정 미리보기
+    st.markdown("**현재 회사 설정:**")
+    for company_name, keywords in st.session_state['company_config'].items():
+        st.caption(f"• **{company_name}**: {', '.join(keywords)}")
+    
     # 현재 설정 요약
     with st.expander("📋 현재 설정 요약"):
         st.write(f"""
@@ -557,8 +753,8 @@ def main():
     # 라벨링 실행 버튼
     if st.button("🚀 라벨링 실행", type="primary", use_container_width=True):
         with st.spinner("라벨링 진행 중..."):
-            # 라벨링 처리
-            df_labeled = process_labeling(df.copy(), TERM_DB, config)
+            # 라벨링 처리 (회사 설정 포함)
+            df_labeled = process_labeling(df.copy(), TERM_DB, config, st.session_state['company_config'])
             
             # 필터링 적용
             df_original_len = len(df_labeled)
